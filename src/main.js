@@ -23,6 +23,7 @@ import './tools/resize.js';
 import './tools/hue-saturation.js';
 import './tools/delete.js';
 import './tools/clone-brush.js';
+import './tools/move.js';
 
 // Application State
 export const appState = {
@@ -33,11 +34,20 @@ export const appState = {
   recorder: new ActionRecorder(),
   layersUI: null,
 
+  // Viewport navigation & pan state
+  isSpacePressed: false,
+  isPanning: false,
+  panStartPos: null,
+
   // Tool interaction states
   isPointerDown: false,
   dragStartDocPos: null,
   currentDocPos: null,
   lassoPoints: [],
+
+  // Move Tool state
+  moveStartLayerPos: null,
+  moveDelta: { x: 0, y: 0 },
   
   // Clone Brush state
   cloneSource: null, // { x, y }
@@ -296,6 +306,25 @@ requestAnimationFrame(animateMarchingAnts);
 /**
  * Setup Tool Switcher
  */
+// Canvas Viewport Wheel Scrolling and Pinch/Ctrl Zooming
+canvasViewport.addEventListener('wheel', (e) => {
+  if (!appState.document) return;
+  e.preventDefault();
+
+  if (e.ctrlKey || e.metaKey) {
+    const zoomFactor = e.deltaY < 0 ? 1.15 : 0.87;
+    appState.viewport.setZoom(appState.viewport.zoom * zoomFactor, appState.document, e.clientX, e.clientY);
+    zoomPercentage.textContent = `${Math.round(appState.viewport.zoom * 100)}%`;
+  } else if (e.shiftKey) {
+    appState.viewport.pan(-e.deltaY, 0, appState.document);
+  } else {
+    appState.viewport.pan(-e.deltaX, -e.deltaY, appState.document);
+  }
+}, { passive: false });
+
+/**
+ * Setup Tool Switcher
+ */
 function setActiveTool(toolName) {
   appState.activeTool = toolName;
   toolButtons.forEach(btn => {
@@ -308,6 +337,14 @@ function setActiveTool(toolName) {
 
   const activeGroup = document.getElementById(`opt-${toolName}`);
   if (activeGroup) activeGroup.style.display = 'flex';
+
+  if (toolName === 'pan') {
+    canvasViewport.style.cursor = 'grab';
+  } else if (toolName === 'move') {
+    canvasViewport.style.cursor = 'move';
+  } else {
+    canvasViewport.style.cursor = '';
+  }
 
   renderOverlay();
 }
@@ -324,6 +361,14 @@ toolButtons.forEach(btn => {
 canvasViewport.addEventListener('pointerdown', (e) => {
   if (!appState.document) return;
   const docPos = appState.viewport.screenToDoc(e, appState.document);
+
+  // Check if Middle Mouse Button (button 1) or Spacebar held or Pan tool active -> Pan
+  if (e.button === 1 || appState.isSpacePressed || appState.activeTool === 'pan') {
+    appState.isPanning = true;
+    appState.panStartPos = { x: e.clientX, y: e.clientY };
+    canvasViewport.style.cursor = 'grabbing';
+    return;
+  }
 
   // Check Alt + Click for Clone Brush source
   if (appState.activeTool === 'clone-brush') {
@@ -342,7 +387,17 @@ canvasViewport.addEventListener('pointerdown', (e) => {
   appState.dragStartDocPos = docPos;
   appState.currentDocPos = docPos;
 
-  if (appState.activeTool === 'select-lasso') {
+  if (appState.activeTool === 'move') {
+    if (appState.document.selection) {
+      appState.moveStartDocPos = { ...docPos };
+      appState.moveDelta = { x: 0, y: 0 };
+    } else {
+      const activeLayer = getActiveLayer(appState.document);
+      if (activeLayer) {
+        appState.moveStartLayerPos = { x: activeLayer.x, y: activeLayer.y };
+      }
+    }
+  } else if (appState.activeTool === 'select-lasso') {
     appState.lassoPoints = [{ x: docPos.x, y: docPos.y }];
   } else if (appState.activeTool === 'clone-brush') {
     if (appState.cloneSource) {
@@ -369,11 +424,38 @@ canvasViewport.addEventListener('pointerdown', (e) => {
 
 window.addEventListener('pointermove', (e) => {
   if (!appState.document) return;
+
+  // Handle live panning
+  if (appState.isPanning && appState.panStartPos) {
+    const dx = e.clientX - appState.panStartPos.x;
+    const dy = e.clientY - appState.panStartPos.y;
+    appState.viewport.pan(dx, dy, appState.document);
+    appState.panStartPos = { x: e.clientX, y: e.clientY };
+    return;
+  }
+
   const docPos = appState.viewport.screenToDoc(e, appState.document);
   appState.currentDocPos = docPos;
 
   if (appState.isPointerDown) {
-    if (appState.activeTool === 'select-lasso') {
+    if (appState.activeTool === 'move') {
+      if (appState.document.selection) {
+        appState.moveDelta = {
+          x: docPos.x - appState.moveStartDocPos.x,
+          y: docPos.y - appState.moveStartDocPos.y
+        };
+        renderOverlay();
+      } else {
+        const activeLayer = getActiveLayer(appState.document);
+        if (activeLayer && appState.moveStartLayerPos) {
+          const dx = docPos.x - appState.dragStartDocPos.x;
+          const dy = docPos.y - appState.dragStartDocPos.y;
+          activeLayer.x = appState.moveStartLayerPos.x + dx;
+          activeLayer.y = appState.moveStartLayerPos.y + dy;
+          renderApp();
+        }
+      }
+    } else if (appState.activeTool === 'select-lasso') {
       const last = appState.lassoPoints[appState.lassoPoints.length - 1];
       if (Math.hypot(docPos.x - last.x, docPos.y - last.y) > 3) {
         appState.lassoPoints.push({ x: docPos.x, y: docPos.y });
@@ -401,11 +483,52 @@ window.addEventListener('pointermove', (e) => {
 });
 
 window.addEventListener('pointerup', (e) => {
+  if (appState.isPanning) {
+    appState.isPanning = false;
+    appState.panStartPos = null;
+    canvasViewport.style.cursor = appState.activeTool === 'pan' ? 'grab' : (appState.activeTool === 'move' ? 'move' : '');
+    return;
+  }
+
   if (!appState.isPointerDown) return;
   appState.isPointerDown = false;
   const docPos = appState.currentDocPos;
 
-  if (appState.activeTool === 'select-rect') {
+  if (appState.activeTool === 'move') {
+    if (appState.document.selection) {
+      const dx = appState.moveDelta.x;
+      const dy = appState.moveDelta.y;
+      appState.moveDelta = { x: 0, y: 0 };
+      if (dx !== 0 || dy !== 0) {
+        executeOp({
+          name: 'move-selection',
+          params: { deltaX: dx, deltaY: dy }
+        });
+      }
+    } else {
+      const activeLayer = getActiveLayer(appState.document);
+      if (activeLayer && appState.moveStartLayerPos) {
+        const finalX = activeLayer.x;
+        const finalY = activeLayer.y;
+        // Reset layer x, y before executeOp so pushState captures original position
+        activeLayer.x = appState.moveStartLayerPos.x;
+        activeLayer.y = appState.moveStartLayerPos.y;
+
+        const deltaX = finalX - appState.moveStartLayerPos.x;
+        const deltaY = finalY - appState.moveStartLayerPos.y;
+        if (deltaX !== 0 || deltaY !== 0) {
+          executeOp({
+            name: 'move-layer',
+            params: {
+              layerId: activeLayer.id,
+              deltaX,
+              deltaY
+            }
+          });
+        }
+      }
+    }
+  } else if (appState.activeTool === 'select-rect') {
     const ratio = selectRatio.value;
     const feather = parseInt(optRectFeather.value, 10) || 0;
     const bounds = calculateAspectRatioBounds(
@@ -675,6 +798,16 @@ window.addEventListener('keydown', (e) => {
     return;
   }
 
+  // Spacebar pan mode
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (!appState.isSpacePressed) {
+      appState.isSpacePressed = true;
+      canvasViewport.style.cursor = 'grab';
+    }
+    return;
+  }
+
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
     e.preventDefault();
     if (e.shiftKey) {
@@ -712,6 +845,10 @@ window.addEventListener('keydown', (e) => {
     cloneSize.value = appState.cloneBrushSize;
     cloneSizeVal.textContent = `${appState.cloneBrushSize}px`;
     renderOverlay();
+  } else if (e.key.toLowerCase() === 'v') {
+    setActiveTool('move');
+  } else if (e.key.toLowerCase() === 'h') {
+    setActiveTool('pan');
   } else if (e.key.toLowerCase() === 'm') {
     setActiveTool('select-rect');
   } else if (e.key.toLowerCase() === 'l') {
@@ -724,6 +861,13 @@ window.addEventListener('keydown', (e) => {
     setActiveTool('hue-saturation');
   } else if (e.key.toLowerCase() === 's') {
     setActiveTool('clone-brush');
+  }
+});
+
+window.addEventListener('keyup', (e) => {
+  if (e.code === 'Space') {
+    appState.isSpacePressed = false;
+    canvasViewport.style.cursor = appState.activeTool === 'pan' ? 'grab' : (appState.activeTool === 'move' ? 'move' : '');
   }
 });
 

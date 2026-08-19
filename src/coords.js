@@ -12,7 +12,7 @@ export class Viewport {
   }
 
   /**
-   * Calculates viewScale based on zoom and devicePixelRatio
+   * Calculates viewScale based on zoom
    */
   getViewScale() {
     return this.zoom;
@@ -58,6 +58,15 @@ export class Viewport {
   }
 
   /**
+   * Pan viewport by screen pixel deltas (dx, dy)
+   */
+  pan(dx, dy, doc) {
+    this.panX += dx;
+    this.panY += dy;
+    this.updateTransform(doc);
+  }
+
+  /**
    * Fit document nicely inside container viewport with padding
    */
   fitToWindow(doc) {
@@ -75,12 +84,26 @@ export class Viewport {
   }
 
   /**
-   * Set explicit zoom level centered on viewport
+   * Set explicit zoom level
    */
-  setZoom(zoomFactor, doc, originScreenX = null, originScreenY = null) {
+  setZoom(zoomFactor, doc, screenOriginX = null, screenOriginY = null) {
     const minZoom = 0.05;
     const maxZoom = 32.0;
-    this.zoom = Math.max(minZoom, Math.min(maxZoom, zoomFactor));
+    const newZoom = Math.max(minZoom, Math.min(maxZoom, zoomFactor));
+    if (newZoom === this.zoom) return;
+
+    if (screenOriginX !== null && screenOriginY !== null) {
+      // Zoom centered at origin point
+      const containerRect = this.container.getBoundingClientRect();
+      const originX = screenOriginX - (containerRect.left + containerRect.width / 2);
+      const originY = screenOriginY - (containerRect.top + containerRect.height / 2);
+
+      const ratio = newZoom / this.zoom;
+      this.panX = originX - (originX - this.panX) * ratio;
+      this.panY = originY - (originY - this.panY) * ratio;
+    }
+
+    this.zoom = newZoom;
     this.updateTransform(doc);
   }
 
@@ -94,6 +117,6 @@ export class Viewport {
 
     this.canvas.style.width = `${displayW}px`;
     this.canvas.style.height = `${displayH}px`;
-    this.canvas.style.transform = `translate(${this.panX}px, ${this.panY}px)`;
+    this.canvas.style.transform = `translate(${Math.round(this.panX)}px, ${Math.round(this.panY)}px)`;
   }
 }

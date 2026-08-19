@@ -58,6 +58,10 @@
     <div class="workspace">
       <!-- Left Toolbar -->
       <aside class="toolbar">
+        <button class="tool-btn" data-tool="move" title="Move Tool (V)">
+          <span class="tool-icon">✥</span>
+          <span class="tool-label">Move</span>
+        </button>
         <button class="tool-btn active" data-tool="select-rect" title="Rectangular Select (M)">
           <span class="tool-icon">⬚</span>
           <span class="tool-label">Rect</span>
@@ -86,12 +90,26 @@
           <span class="tool-icon">🖌️</span>
           <span class="tool-label">Clone</span>
         </button>
+        <button class="tool-btn" data-tool="pan" title="Hand / Pan Tool (H / Space+Drag)">
+          <span class="tool-icon">✋</span>
+          <span class="tool-label">Pan</span>
+        </button>
       </aside>
 
       <!-- Center Stage & Viewport -->
       <main class="stage-container" id="stage-container">
         <!-- Contextual Tool Settings Bar -->
         <div class="tool-options-bar" id="tool-options-bar">
+          <!-- Move Options -->
+          <div class="tool-option-group" id="opt-move" style="display: none;">
+            <span style="color: var(--text-muted);">Click and drag to move the active layer (or move selected area leaving transparency)</span>
+          </div>
+
+          <!-- Pan Options -->
+          <div class="tool-option-group" id="opt-pan" style="display: none;">
+            <span style="color: var(--text-muted);">Click and drag or use mouse wheel to scroll/pan across the canvas</span>
+          </div>
+
           <!-- Rect Options -->
           <div class="tool-option-group" id="opt-select-rect">
             <label>Aspect Ratio:
