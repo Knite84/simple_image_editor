@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Photo Editor - Local Web Studio</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Top Header / Menu Bar -->
+    <header class="app-header">
+      <div class="header-brand">
+        <span class="brand-icon">🎨</span>
+        <span class="brand-title">PhotoEditor Studio</span>
+      </div>
+      
+      <div class="header-actions">
+        <label class="btn btn-secondary btn-file">
+          <span>📂 Open Image</span>
+          <input type="file" id="file-input" accept="image/*" />
+        </label>
+        
+        <button id="btn-sample-image" class="btn btn-secondary" title="Load a demo photo">
+          🖼️ Load Sample
+        </button>
+
+        <div class="divider"></div>
+
+        <button id="btn-undo" class="btn btn-icon" title="Undo (Ctrl+Z)" disabled>
+          ↩️
+        </button>
+        <button id="btn-redo" class="btn btn-icon" title="Redo (Ctrl+Y)" disabled>
+          ↪️
+        </button>
+
+        <div class="divider"></div>
+
+        <!-- Recorder Controls -->
+        <div class="recorder-bar">
+          <button id="btn-record" class="btn btn-record" title="Record actions for batch replay">
+            <span class="record-dot"></span> <span id="record-btn-label">Record</span>
+          </button>
+          <button id="btn-batch-modal" class="btn btn-secondary" title="Open Batch Queue">
+            ⚡ Batch Queue
+          </button>
+        </div>
+
+        <div class="divider"></div>
+
+        <button id="btn-export-modal" class="btn btn-primary">
+          💾 Export Image
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <div class="workspace">
+      <!-- Left Toolbar -->
+      <aside class="toolbar">
+        <button class="tool-btn active" data-tool="select-rect" title="Rectangular Select (M)">
+          <span class="tool-icon">⬚</span>
+          <span class="tool-label">Rect</span>
+        </button>
+        <button class="tool-btn" data-tool="select-lasso" title="Lasso Select (L)">
+          <span class="tool-icon">➰</span>
+          <span class="tool-label">Lasso</span>
+        </button>
+        <button class="tool-btn" data-tool="crop" title="Crop Tool (C)">
+          <span class="tool-icon">✂️</span>
+          <span class="tool-label">Crop</span>
+        </button>
+        <button class="tool-btn" data-tool="resize" title="Resize Image (R)">
+          <span class="tool-icon">📐</span>
+          <span class="tool-label">Resize</span>
+        </button>
+        <button class="tool-btn" data-tool="hue-saturation" title="Hue & Saturation (U)">
+          <span class="tool-icon">🎭</span>
+          <span class="tool-label">HSL</span>
+        </button>
+        <button class="tool-btn" data-tool="delete" title="Delete / Fill (Del)">
+          <span class="tool-icon">🗑️</span>
+          <span class="tool-label">Delete</span>
+        </button>
+        <button class="tool-btn" data-tool="clone-brush" title="Clone Stamp (S)">
+          <span class="tool-icon">🖌️</span>
+          <span class="tool-label">Clone</span>
+        </button>
+      </aside>
+
+      <!-- Center Stage & Viewport -->
+      <main class="stage-container" id="stage-container">
+        <!-- Contextual Tool Settings Bar -->
+        <div class="tool-options-bar" id="tool-options-bar">
+          <!-- Rect Options -->
+          <div class="tool-option-group" id="opt-select-rect">
+            <label>Aspect Ratio:
+              <select id="select-ratio">
+                <option value="free">Free</option>
+                <option value="1:1">1:1 (Square)</option>
+                <option value="3:2">3:2 (Photo)</option>
+                <option value="4:3">4:3 (Standard)</option>
+                <option value="16:9">16:9 (Widescreen)</option>
+              </select>
+            </label>
+            <label>Feather:
+              <input type="number" id="opt-rect-feather" min="0" max="100" value="0" style="width: 55px;" /> px
+            </label>
+            <button id="btn-rect-deselect" class="btn btn-sm btn-secondary">Clear Selection</button>
+          </div>
+
+          <!-- Lasso Options -->
+          <div class="tool-option-group" id="opt-select-lasso" style="display: none;">
+            <label>Feather:
+              <input type="number" id="opt-lasso-feather" min="0" max="100" value="0" style="width: 55px;" /> px
+            </label>
+            <button id="btn-lasso-deselect" class="btn btn-sm btn-secondary">Clear Selection</button>
+          </div>
+
+          <!-- Crop Options -->
+          <div class="tool-option-group" id="opt-crop" style="display: none;">
+            <span style="color: var(--text-muted);">Select an area or drag to define crop region:</span>
+            <button id="btn-apply-crop" class="btn btn-sm btn-primary">Apply Crop</button>
+          </div>
+
+          <!-- Resize Options -->
+          <div class="tool-option-group" id="opt-resize" style="display: none;">
+            <label>Width: <input type="number" id="resize-w" style="width: 70px;" /></label>
+            <label>Height: <input type="number" id="resize-h" style="width: 70px;" /></label>
+            <label><input type="checkbox" id="resize-lock-ratio" checked /> Lock Aspect Ratio</label>
+            <button id="btn-apply-resize" class="btn btn-sm btn-primary">Apply Resize</button>
+          </div>
+
+          <!-- HSL Options -->
+          <div class="tool-option-group" id="opt-hue-saturation" style="display: none;">
+            <label>Hue: <span id="hsl-h-val">0°</span> <input type="range" id="hsl-h" min="-180" max="180" value="0" style="width: 80px;" /></label>
+            <label>Sat: <span id="hsl-s-val">0%</span> <input type="range" id="hsl-s" min="-100" max="100" value="0" style="width: 80px;" /></label>
+            <label>Light: <span id="hsl-l-val">0%</span> <input type="range" id="hsl-l" min="-100" max="100" value="0" style="width: 80px;" /></label>
+            <button id="btn-apply-hsl" class="btn btn-sm btn-primary">Apply HSL</button>
+            <button id="btn-reset-hsl" class="btn btn-sm btn-secondary">Reset</button>
+          </div>
+
+          <!-- Delete Options -->
+          <div class="tool-option-group" id="opt-delete" style="display: none;">
+            <label><input type="radio" name="delete-mode" value="transparent" checked /> Transparent</label>
+            <label><input type="radio" name="delete-mode" value="color" /> Color Fill</label>
+            <input type="color" id="delete-fill-color" value="#ffffff" style="width: 28px; height: 22px; padding: 0; border: none; border-radius: 4px; cursor: pointer;" />
+            <button id="btn-apply-delete" class="btn btn-sm btn-primary">Execute Delete</button>
+          </div>
+
+          <!-- Clone Brush Options -->
+          <div class="tool-option-group" id="opt-clone-brush" style="display: none;">
+            <label>Size: <span id="clone-size-val">40px</span> <input type="range" id="clone-size" min="5" max="180" value="40" style="width: 80px;" /></label>
+            <label>Hardness: <span id="clone-hardness-val">40%</span> <input type="range" id="clone-hardness" min="0" max="100" value="40" style="width: 70px;" /></label>
+            <button id="btn-set-source" class="btn btn-sm btn-secondary" title="Click on image to set sample point">🎯 Set Source Point</button>
+            <span id="clone-source-status" style="color: var(--text-muted); font-size: 11px;">Source: Not set (Alt+Click)</span>
+          </div>
+        </div>
+
+        <!-- Canvas Viewport with transparent checkerboard backdrop -->
+        <div class="canvas-viewport" id="canvas-viewport">
+          <div class="canvas-wrapper" id="canvas-wrapper">
+            <canvas id="display-canvas"></canvas>
+            <canvas id="overlay-canvas"></canvas>
+          </div>
+        </div>
+
+        <!-- Viewport Bottom Control Bar -->
+        <footer class="viewport-footer">
+          <div class="doc-info" id="doc-info">
+            <span id="doc-dimensions">0 × 0 px</span>
+          </div>
+          <div class="zoom-controls">
+            <button id="btn-zoom-out" class="btn btn-icon btn-sm" title="Zoom Out">−</button>
+            <span id="zoom-percentage">100%</span>
+            <button id="btn-zoom-in" class="btn btn-icon btn-sm" title="Zoom In">+</button>
+            <button id="btn-fit-screen" class="btn btn-sm btn-secondary" title="Fit to Screen">Fit</button>
+          </div>
+        </footer>
+      </main>
+
+      <!-- Right Sidebar: Layers & Action Inspector -->
+      <aside class="sidebar">
+        <!-- Tab Headers -->
+        <div class="sidebar-tabs">
+          <button class="tab-btn active" data-tab="layers">Layers</button>
+          <button class="tab-btn" data-tab="actions">Recorded Actions</button>
+        </div>
+
+        <!-- Layers Panel -->
+        <div class="tab-content active" id="tab-layers">
+          <div class="panel-header">
+            <span class="panel-title">Layers</span>
+            <div class="panel-actions">
+              <label class="btn btn-icon btn-sm btn-file" title="Import Image as New Layer">
+                <span>🖼️+</span>
+                <input type="file" id="layer-file-input" accept="image/*" />
+              </label>
+              <button id="btn-add-layer" class="btn btn-icon btn-sm" title="New Blank Layer">＋</button>
+              <button id="btn-dup-layer" class="btn btn-icon btn-sm" title="Duplicate Layer">📋</button>
+              <button id="btn-del-layer" class="btn btn-icon btn-sm" title="Delete Layer">🗑️</button>
+            </div>
+          </div>
+          
+          <div class="layer-opacity-control">
+            <label for="layer-opacity">Opacity: <span id="opacity-val">100%</span></label>
+            <input type="range" id="layer-opacity" min="0" max="100" value="100" />
+          </div>
+
+          <div class="layers-list" id="layers-list">
+            <!-- Layers dynamically populated -->
+          </div>
+        </div>
+
+        <!-- Actions Panel -->
+        <div class="tab-content" id="tab-actions">
+          <div class="panel-header">
+            <span class="panel-title">Recorded Steps</span>
+            <button id="btn-clear-actions" class="btn btn-sm btn-secondary">Clear</button>
+          </div>
+          <div class="actions-list" id="actions-list">
+            <p class="empty-state">No steps recorded. Hit Record to capture actions.</p>
+          </div>
+          <div class="actions-footer">
+            <button id="btn-export-actions" class="btn btn-sm btn-secondary">Save JSON</button>
+            <label class="btn btn-sm btn-secondary btn-file">
+              <span>Load JSON</span>
+              <input type="file" id="load-actions-input" accept=".json" />
+            </label>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- Modals Placeholder -->
+    <div id="modal-container"></div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
