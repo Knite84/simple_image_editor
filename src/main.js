@@ -178,6 +178,10 @@ export function renderApp() {
   zoomPercentage.textContent = `${Math.round(appState.viewport.zoom * 100)}%`;
   appState.viewport.updateTransform(doc);
 
+  // Sync overlay canvas CSS size to display canvas so pointer coords align correctly
+  overlayCanvas.style.width = displayCanvas.style.width;
+  overlayCanvas.style.height = displayCanvas.style.height;
+
   // Update Resize inputs if not focused
   if (document.activeElement !== resizeW && document.activeElement !== resizeH) {
     resizeW.value = doc.width;
