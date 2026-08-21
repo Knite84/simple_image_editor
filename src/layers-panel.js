@@ -55,6 +55,25 @@ export function setupLayersPanel(appState, onLayerChange) {
       nameSpan.className = 'layer-name';
       nameSpan.textContent = layer.name;
 
+      // Multi-select checkbox (explicit, modifier-free way to build a selection set)
+      const selectCb = document.createElement('input');
+      selectCb.type = 'checkbox';
+      selectCb.className = 'layer-select-cb';
+      selectCb.checked = multiSelected.includes(layer.id);
+      selectCb.title = 'Select for merge';
+      selectCb.onclick = (e) => {
+        e.stopPropagation();
+        const multi = getMultiSelected();
+        const pos = multi.indexOf(layer.id);
+        if (selectCb.checked) {
+          if (pos < 0) multi.push(layer.id);
+        } else if (pos >= 0) {
+          multi.splice(pos, 1);
+        }
+        updateMergeButton();
+        onLayerChange();
+      };
+
       // Visibility Toggle
       const visBtn = document.createElement('button');
       visBtn.className = `layer-vis-btn ${!layer.visible ? 'hidden' : ''}`;
@@ -118,7 +137,14 @@ export function setupLayersPanel(appState, onLayerChange) {
           if (pos >= 0) {
             multi.splice(pos, 1);
           } else {
-            multi.push(layer.id);
+            // Seed with the current active layer so the layer being worked
+            // on is included without having to re-click it first
+            if (doc.activeLayerId && !multi.includes(doc.activeLayerId)) {
+              multi.push(doc.activeLayerId);
+            }
+            if (!multi.includes(layer.id)) {
+              multi.push(layer.id);
+            }
             doc.activeLayerId = layer.id;
           }
         } else if (e.shiftKey && doc.activeLayerId) {
@@ -146,6 +172,7 @@ export function setupLayersPanel(appState, onLayerChange) {
         onLayerChange();
       };
 
+      item.appendChild(selectCb);
       item.appendChild(visBtn);
       item.appendChild(thumb);
       item.appendChild(nameSpan);

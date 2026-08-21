@@ -407,6 +407,14 @@ body {
 
 .layer-item.selected {
   border-color: var(--accent-color);
+  background: rgba(59, 130, 246, 0.15);
+}
+
+.layer-select-cb {
+  margin: 0 2px;
+  cursor: pointer;
+  accent-color: var(--accent-color);
+  flex-shrink: 0;
 }
 
 .layer-thumb {
