@@ -2,7 +2,7 @@
  * Rectangular Selection Tool & Op
  */
 
-import { createRectSelection } from '../selection.js';
+import { createRectSelection, createLassoSelection } from '../selection.js';
 import { registerOp } from '../ops.js';
 
 /**
@@ -21,6 +21,25 @@ registerOp('select-rect', (doc, params) => {
 
 registerOp('clear-selection', (doc) => {
   doc.selection = null;
+  return doc;
+});
+
+/**
+ * Re-applies feathering to the existing selection without altering its geometry
+ */
+registerOp('set-selection-feather', (doc, params) => {
+  const sel = doc.selection;
+  if (!sel) return doc;
+
+  const feather = Math.max(0, params.feather || 0);
+
+  if (sel.type === 'rect') {
+    const { x, y, w, h } = sel.bounds;
+    doc.selection = createRectSelection(x, y, w, h, feather);
+  } else if (sel.points && sel.points.length >= 3) {
+    doc.selection = createLassoSelection(sel.points, feather);
+  }
+
   return doc;
 });
 

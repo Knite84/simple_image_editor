@@ -625,6 +625,17 @@ window.addEventListener('pointerup', (e) => {
 btnRectDeselect.onclick = () => executeOp({ name: 'clear-selection' });
 btnLassoDeselect.onclick = () => executeOp({ name: 'clear-selection' });
 
+// Feather applies to the active selection immediately (select first, feather after)
+const applySelectionFeather = (featherInput) => {
+  const sel = appState.document && appState.document.selection;
+  if (!sel) return;
+  const feather = Math.max(0, parseInt(featherInput.value, 10) || 0);
+  if (sel.feather === feather) return;
+  executeOp({ name: 'set-selection-feather', params: { feather } });
+};
+optRectFeather.oninput = () => applySelectionFeather(optRectFeather);
+optLassoFeather.oninput = () => applySelectionFeather(optLassoFeather);
+
 // Rect Aspect Ratio
 selectRatio.onchange = () => {
   const value = selectRatio.value;
