@@ -83,6 +83,8 @@ const docDimensions = document.getElementById('doc-dimensions');
 // Tool options elements
 const toolButtons = document.querySelectorAll('.tool-btn');
 const selectRatio = document.getElementById('select-ratio');
+const optRatioWidth = document.getElementById('opt-ratio-width');
+const optRatioHeight = document.getElementById('opt-ratio-height');
 const optRectFeather = document.getElementById('opt-rect-feather');
 const optLassoFeather = document.getElementById('opt-lasso-feather');
 const btnRectDeselect = document.getElementById('btn-rect-deselect');
@@ -126,6 +128,18 @@ appState.viewport = new Viewport(canvasViewport, displayCanvas);
 appState.layersUI = setupLayersPanel(appState, () => {
   renderApp();
 });
+
+/**
+ * Resolves the active aspect ratio for the Rect tool as a "W:H" string.
+ * Returns 'free' when Free is selected or the custom fields hold no valid positive values.
+ */
+function getActiveRectRatio() {
+  if (selectRatio.value === 'free') return 'free';
+  const w = parseFloat(optRatioWidth.value);
+  const h = parseFloat(optRatioHeight.value);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return 'free';
+  return `${w}:${h}`;
+}
 
 /**
  * Execute an operation on the document with Undo snapshot and Recorder capture
@@ -235,7 +249,7 @@ function renderOverlay() {
   if (appState.isPointerDown) {
     if (appState.activeTool === 'select-rect' || appState.activeTool === 'crop') {
       if (appState.dragStartDocPos && appState.currentDocPos) {
-        const ratio = appState.activeTool === 'select-rect' ? selectRatio.value : 'free';
+        const ratio = appState.activeTool === 'select-rect' ? getActiveRectRatio() : 'free';
         const bounds = calculateAspectRatioBounds(
           appState.dragStartDocPos.x,
           appState.dragStartDocPos.y,
@@ -533,7 +547,7 @@ window.addEventListener('pointerup', (e) => {
       }
     }
   } else if (appState.activeTool === 'select-rect') {
-    const ratio = selectRatio.value;
+    const ratio = getActiveRectRatio();
     const feather = parseInt(optRectFeather.value, 10) || 0;
     const bounds = calculateAspectRatioBounds(
       appState.dragStartDocPos.x,
@@ -596,6 +610,20 @@ window.addEventListener('pointerup', (e) => {
 // Clear Selection
 btnRectDeselect.onclick = () => executeOp({ name: 'clear-selection' });
 btnLassoDeselect.onclick = () => executeOp({ name: 'clear-selection' });
+
+// Rect Aspect Ratio
+selectRatio.onchange = () => {
+  const value = selectRatio.value;
+  if (value === 'free' || value === 'custom') return;
+  const [rw, rh] = value.split(':').map(Number);
+  optRatioWidth.value = rw;
+  optRatioHeight.value = rh;
+};
+const syncCustomRatioFromFields = () => {
+  if (selectRatio.value !== 'custom') selectRatio.value = 'custom';
+};
+optRatioWidth.oninput = syncCustomRatioFromFields;
+optRatioHeight.oninput = syncCustomRatioFromFields;
 
 // Crop Action
 btnApplyCrop.onclick = () => {

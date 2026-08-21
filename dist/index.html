@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Photo Editor - Local Web Studio</title>
-  <script type="module" crossorigin src="./assets/index-CCTwb6SP.js"></script>
+  <script type="module" crossorigin src="./assets/index-B6pQ3GWf.js"></script>
   <link rel="stylesheet" crossorigin href="./assets/index-BANRsTBV.css">
 </head>
 <body>
@@ -120,7 +120,14 @@
                 <option value="3:2">3:2 (Photo)</option>
                 <option value="4:3">4:3 (Standard)</option>
                 <option value="16:9">16:9 (Widescreen)</option>
+                <option value="custom">Custom</option>
               </select>
+            </label>
+            <label>Width:
+              <input type="number" id="opt-ratio-width" min="0" step="any" value="1" style="width: 55px;" />
+            </label>
+            <label>Height:
+              <input type="number" id="opt-ratio-height" min="0" step="any" value="1" style="width: 55px;" />
             </label>
             <label>Feather:
               <input type="number" id="opt-rect-feather" min="0" max="100" value="0" style="width: 55px;" /> px
