@@ -569,6 +569,9 @@ window.addEventListener('pointerup', (e) => {
         name: 'select-rect',
         params: { bounds, feather }
       });
+    } else if (appState.document.selection) {
+      // Plain click (no drag) clears the current selection
+      executeOp({ name: 'clear-selection' });
     }
   } else if (appState.activeTool === 'select-lasso') {
     const feather = parseInt(optLassoFeather.value, 10) || 0;
@@ -577,6 +580,9 @@ window.addEventListener('pointerup', (e) => {
         name: 'select-lasso',
         params: { points: appState.lassoPoints, feather }
       });
+    } else if (appState.document.selection) {
+      // Plain click (no drag) clears the current selection
+      executeOp({ name: 'clear-selection' });
     }
     appState.lassoPoints = [];
   } else if (appState.activeTool === 'crop') {
