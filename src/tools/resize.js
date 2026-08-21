@@ -69,3 +69,34 @@ registerOp('resize', (doc, params) => {
 
   return doc;
 });
+
+/**
+ * Op: Transform Layer
+ * Scales a single layer's canvas. Anchors the result at the layer's center
+ * unless explicit x/y coordinates are provided (used by interactive handles).
+ */
+registerOp('transform-layer', (doc, params) => {
+  const layer = doc.layers.find(l => l.id === (params.layerId || doc.activeLayerId));
+  if (!layer) return doc;
+
+  const targetW = Math.max(1, Math.round(params.width || layer.canvas.width));
+  const targetH = Math.max(1, Math.round(params.height || layer.canvas.height));
+
+  let newX, newY;
+  if (Number.isFinite(params.x) && Number.isFinite(params.y)) {
+    newX = Math.round(params.x);
+    newY = Math.round(params.y);
+  } else {
+    // Center anchor: keep the layer's visual center fixed
+    newX = Math.round(layer.x + (layer.canvas.width - targetW) / 2);
+    newY = Math.round(layer.y + (layer.canvas.height - targetH) / 2);
+  }
+
+  if (targetW !== layer.canvas.width || targetH !== layer.canvas.height) {
+    layer.canvas = scaleCanvasWithStepDown(layer.canvas, targetW, targetH);
+  }
+  layer.x = newX;
+  layer.y = newY;
+
+  return doc;
+});

@@ -14,6 +14,7 @@ import { calculateAspectRatioBounds } from './tools/select-rect.js';
 import { interpolateStroke, applyStamp, getCircularBrushMask } from './tools/clone-brush.js';
 import { applyHslToImageData } from './tools/hue-saturation.js';
 import { getSelectionMask, getFeatheredBounds } from './selection.js';
+import { getHandlePositions, hitTestHandles, computeHandleResize, HANDLE_IDS, CORNER_HANDLES, HANDLE_CURSORS } from './transform.js';
 
 // Load tool op handlers
 import './tools/select-rect.js';
@@ -48,7 +49,11 @@ export const appState = {
   // Move Tool state
   moveStartLayerPos: null,
   moveDelta: { x: 0, y: 0 },
-  
+
+  // Interactive layer transform state (Transform tool handles)
+  transformDrag: null,   // { layerId, handleId, startRect, previewRect }
+  transformHover: null,  // hovered handle id or null
+
   // Clone Brush state
   cloneSource: null, // { x, y }
   isSettingCloneSource: false,
@@ -92,6 +97,7 @@ const btnLassoDeselect = document.getElementById('btn-lasso-deselect');
 const btnApplyCrop = document.getElementById('btn-apply-crop');
 const resizeW = document.getElementById('resize-w');
 const resizeH = document.getElementById('resize-h');
+const resizeScope = document.getElementById('resize-scope');
 const resizeLockRatio = document.getElementById('resize-lock-ratio');
 const btnApplyResize = document.getElementById('btn-apply-resize');
 
@@ -182,7 +188,11 @@ export function renderApp() {
   if (appState.isHslPreviewing && appState.hslProxyCanvas) {
     ctx.drawImage(appState.hslProxyCanvas, 0, 0, doc.width, doc.height);
   } else {
-    const composite = renderComposite(doc);
+    let overrides = null;
+    if (appState.transformDrag) {
+      overrides = new Map([[appState.transformDrag.layerId, appState.transformDrag.previewRect]]);
+    }
+    const composite = renderComposite(doc, overrides);
     ctx.drawImage(composite, 0, 0);
   }
 
@@ -197,8 +207,11 @@ export function renderApp() {
 
   // Update Resize inputs if not focused
   if (document.activeElement !== resizeW && document.activeElement !== resizeH) {
-    resizeW.value = doc.width;
-    resizeH.value = doc.height;
+    const basis = getResizeBasis();
+    if (basis) {
+      resizeW.value = basis.w;
+      resizeH.value = basis.h;
+    }
   }
 
   appState.layersUI.render();
@@ -242,6 +255,35 @@ function renderOverlay() {
     }
 
     ctx.restore();
+  }
+
+  // 1.5 Render layer transform handles (Transform tool, no active selection)
+  if (appState.activeTool === 'transform' && !doc.selection) {
+    const layer = getActiveLayer(doc);
+    if (layer) {
+      const rect = appState.transformDrag && appState.transformDrag.layerId === layer.id
+        ? appState.transformDrag.previewRect
+        : { x: layer.x, y: layer.y, w: layer.canvas.width, h: layer.canvas.height };
+      const zoom = appState.viewport.zoom || 1;
+      const positions = getHandlePositions(rect);
+      const handleSize = 8 / zoom;
+      const lineWidth = 1 / zoom;
+
+      ctx.save();
+      ctx.strokeStyle = '#3b82f6';
+      ctx.lineWidth = lineWidth;
+      ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+
+      for (const id of HANDLE_IDS) {
+        const p = positions[id];
+        ctx.fillStyle = appState.transformHover === id ? '#3b82f6' : '#ffffff';
+        ctx.beginPath();
+        ctx.rect(p.x - handleSize / 2, p.y - handleSize / 2, handleSize, handleSize);
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
   }
 
   // 2. Render live dragging selection preview
@@ -365,7 +407,7 @@ function setActiveTool(toolName) {
 
   if (toolName === 'pan') {
     canvasViewport.style.cursor = 'grab';
-  } else if (toolName === 'move') {
+  } else if (toolName === 'transform') {
     canvasViewport.style.cursor = 'move';
   } else {
     canvasViewport.style.cursor = '';
@@ -379,6 +421,34 @@ toolButtons.forEach(btn => {
     setActiveTool(btn.dataset.tool);
   });
 });
+
+/**
+ * Commits an interactive layer transform drag via the transform-layer op.
+ * The layer's real pixels were never mutated during the preview, so the
+ * op's history snapshot captures the pre-drag state automatically.
+ */
+function commitTransformDrag() {
+  const d = appState.transformDrag;
+  appState.transformDrag = null;
+  const r = d.previewRect;
+  const s = d.startRect;
+  if (r.w !== s.w || r.h !== s.h || r.x !== s.x || r.y !== s.y) {
+    executeOp({
+      name: 'transform-layer',
+      params: { layerId: d.layerId, width: r.w, height: r.h, x: r.x, y: r.y }
+    });
+  } else {
+    renderApp();
+  }
+}
+
+/**
+ * Cancels an interactive layer transform drag (Esc), discarding the preview
+ */
+function cancelTransformDrag() {
+  appState.transformDrag = null;
+  renderApp();
+}
 
 /**
  * Pointer / Canvas Event Routing
@@ -408,11 +478,31 @@ canvasViewport.addEventListener('pointerdown', (e) => {
     }
   }
 
+  // Transform handle drag start (Transform tool, no selection)
+  if (appState.activeTool === 'transform' && !appState.document.selection) {
+    const layer = getActiveLayer(appState.document);
+    if (layer) {
+      const tol = 6 / appState.viewport.zoom;
+      const rect = { x: layer.x, y: layer.y, w: layer.canvas.width, h: layer.canvas.height };
+      const hit = hitTestHandles(rect, docPos.rawX, docPos.rawY, tol);
+      if (hit) {
+        appState.transformDrag = {
+          layerId: layer.id,
+          handleId: hit,
+          startRect: { ...rect },
+          previewRect: { ...rect }
+        };
+        renderApp();
+        return;
+      }
+    }
+  }
+
   appState.isPointerDown = true;
   appState.dragStartDocPos = docPos;
   appState.currentDocPos = docPos;
 
-  if (appState.activeTool === 'move') {
+  if (appState.activeTool === 'transform') {
     if (appState.document.selection) {
       appState.moveStartDocPos = { ...docPos };
       appState.moveDelta = { x: 0, y: 0 };
@@ -462,8 +552,33 @@ window.addEventListener('pointermove', (e) => {
   const docPos = appState.viewport.screenToDoc(e, appState.document);
   appState.currentDocPos = docPos;
 
+  // Live layer transform drag
+  if (appState.transformDrag) {
+    const d = appState.transformDrag;
+    const isCorner = CORNER_HANDLES.includes(d.handleId);
+    const keepRatio = isCorner && !e.shiftKey;
+    d.previewRect = computeHandleResize(d.startRect, d.handleId, docPos.rawX, docPos.rawY, keepRatio);
+    renderApp();
+    return;
+  }
+
+  // Transform handle hover feedback (Transform tool)
+  if (appState.activeTool === 'transform' && !appState.isPointerDown && !appState.document.selection) {
+    const layer = getActiveLayer(appState.document);
+    if (layer) {
+      const tol = 6 / appState.viewport.zoom;
+      const rect = { x: layer.x, y: layer.y, w: layer.canvas.width, h: layer.canvas.height };
+      const hit = hitTestHandles(rect, docPos.rawX, docPos.rawY, tol);
+      if (hit !== appState.transformHover) {
+        appState.transformHover = hit;
+        renderOverlay();
+      }
+      canvasViewport.style.cursor = hit ? HANDLE_CURSORS[hit] : 'move';
+    }
+  }
+
   if (appState.isPointerDown) {
-    if (appState.activeTool === 'move') {
+    if (appState.activeTool === 'transform') {
       if (appState.document.selection) {
         appState.moveDelta = {
           x: docPos.x - appState.moveStartDocPos.x,
@@ -511,7 +626,13 @@ window.addEventListener('pointerup', (e) => {
   if (appState.isPanning) {
     appState.isPanning = false;
     appState.panStartPos = null;
-    canvasViewport.style.cursor = appState.activeTool === 'pan' ? 'grab' : (appState.activeTool === 'move' ? 'move' : '');
+    canvasViewport.style.cursor = appState.activeTool === 'pan' ? 'grab' : (appState.activeTool === 'transform' ? 'move' : '');
+    return;
+  }
+
+  // Commit interactive layer transform
+  if (appState.transformDrag) {
+    commitTransformDrag();
     return;
   }
 
@@ -519,7 +640,7 @@ window.addEventListener('pointerup', (e) => {
   appState.isPointerDown = false;
   const docPos = appState.currentDocPos;
 
-  if (appState.activeTool === 'move') {
+  if (appState.activeTool === 'transform') {
     if (appState.document.selection) {
       const dx = appState.moveDelta.x;
       const dy = appState.moveDelta.y;
@@ -663,30 +784,57 @@ btnApplyCrop.onclick = () => {
 };
 
 // Resize Action
+function getResizeBasis() {
+  if (!appState.document) return null;
+  if (resizeScope.value === 'layer') {
+    const layer = getActiveLayer(appState.document);
+    if (layer) return { w: layer.canvas.width, h: layer.canvas.height };
+  }
+  return { w: appState.document.width, h: appState.document.height };
+}
+resizeScope.onchange = () => {
+  const basis = getResizeBasis();
+  if (basis) {
+    resizeW.value = basis.w;
+    resizeH.value = basis.h;
+  }
+};
 resizeLockRatio.onchange = () => {
-  if (!appState.document) return;
-  resizeH.value = Math.round(parseInt(resizeW.value, 10) * (appState.document.height / appState.document.width));
+  const basis = getResizeBasis();
+  if (!basis) return;
+  resizeH.value = Math.round(parseInt(resizeW.value, 10) * (basis.h / basis.w));
 };
 resizeW.oninput = () => {
-  if (resizeLockRatio.checked && appState.document) {
+  const basis = getResizeBasis();
+  if (resizeLockRatio.checked && basis) {
     const nw = parseInt(resizeW.value, 10) || 1;
-    resizeH.value = Math.round(nw * (appState.document.height / appState.document.width));
+    resizeH.value = Math.round(nw * (basis.h / basis.w));
   }
 };
 resizeH.oninput = () => {
-  if (resizeLockRatio.checked && appState.document) {
+  const basis = getResizeBasis();
+  if (resizeLockRatio.checked && basis) {
     const nh = parseInt(resizeH.value, 10) || 1;
-    resizeW.value = Math.round(nh * (appState.document.width / appState.document.height));
+    resizeW.value = Math.round(nh * (basis.w / basis.h));
   }
 };
 btnApplyResize.onclick = () => {
   const w = parseInt(resizeW.value, 10);
   const h = parseInt(resizeH.value, 10);
-  if (w > 0 && h > 0) {
-    executeOp({
-      name: 'resize',
-      params: { width: w, height: h }
-    });
+  if (w > 0 && h > 0 && appState.document) {
+    if (resizeScope.value === 'layer') {
+      const layer = getActiveLayer(appState.document);
+      if (!layer || (w === layer.canvas.width && h === layer.canvas.height)) return;
+      executeOp({
+        name: 'transform-layer',
+        params: { layerId: layer.id, width: w, height: h }
+      });
+    } else {
+      executeOp({
+        name: 'resize',
+        params: { width: w, height: h }
+      });
+    }
   }
 };
 
@@ -857,6 +1005,13 @@ window.addEventListener('keydown', (e) => {
     return;
   }
 
+  // Cancel active layer transform drag
+  if (e.key === 'Escape' && appState.transformDrag) {
+    e.preventDefault();
+    cancelTransformDrag();
+    return;
+  }
+
   // Spacebar pan mode
   if (e.code === 'Space') {
     e.preventDefault();
@@ -905,7 +1060,7 @@ window.addEventListener('keydown', (e) => {
     cloneSizeVal.textContent = `${appState.cloneBrushSize}px`;
     renderOverlay();
   } else if (e.key.toLowerCase() === 'v') {
-    setActiveTool('move');
+    setActiveTool('transform');
   } else if (e.key.toLowerCase() === 'h') {
     setActiveTool('pan');
   } else if (e.key.toLowerCase() === 'm') {
@@ -915,7 +1070,7 @@ window.addEventListener('keydown', (e) => {
   } else if (e.key.toLowerCase() === 'c') {
     setActiveTool('crop');
   } else if (e.key.toLowerCase() === 'r') {
-    setActiveTool('resize');
+    setActiveTool('transform');
   } else if (e.key.toLowerCase() === 'u') {
     setActiveTool('hue-saturation');
   } else if (e.key.toLowerCase() === 's') {
@@ -926,7 +1081,7 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => {
   if (e.code === 'Space') {
     appState.isSpacePressed = false;
-    canvasViewport.style.cursor = appState.activeTool === 'pan' ? 'grab' : (appState.activeTool === 'move' ? 'move' : '');
+    canvasViewport.style.cursor = appState.activeTool === 'pan' ? 'grab' : (appState.activeTool === 'transform' ? 'move' : '');
   }
 });
 

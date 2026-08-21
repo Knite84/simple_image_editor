@@ -104,9 +104,12 @@ export function getActiveLayer(doc) {
 /**
  * Pure compositor: loops visible layers bottom-to-top and draws onto a fresh canvas.
  * @param {Object} doc - Document instance
+ * @param {Map|null} layerOverrides - Optional Map of layerId -> {x, y, w, h} used to
+ *        draw a layer scaled/repositioned (e.g. live transform preview) without
+ *        mutating its real pixels.
  * @returns {HTMLCanvasElement} Composite canvas
  */
-export function renderComposite(doc) {
+export function renderComposite(doc, layerOverrides = null) {
   const compositeCanvas = document.createElement('canvas');
   compositeCanvas.width = Math.max(1, doc.width);
   compositeCanvas.height = Math.max(1, doc.height);
@@ -115,9 +118,15 @@ export function renderComposite(doc) {
   for (const layer of doc.layers) {
     if (!layer.visible || layer.opacity <= 0) continue;
 
+    const override = layerOverrides ? layerOverrides.get(layer.id) : null;
+
     ctx.save();
     ctx.globalAlpha = layer.opacity;
-    ctx.drawImage(layer.canvas, layer.x, layer.y);
+    if (override) {
+      ctx.drawImage(layer.canvas, override.x, override.y, override.w, override.h);
+    } else {
+      ctx.drawImage(layer.canvas, layer.x, layer.y);
+    }
     ctx.restore();
   }
 

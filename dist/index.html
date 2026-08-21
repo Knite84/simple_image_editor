@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Photo Editor - Local Web Studio</title>
-  <script type="module" crossorigin src="./assets/index-CFhEEInZ.js"></script>
+  <script type="module" crossorigin src="./assets/index-DL05nkBd.js"></script>
   <link rel="stylesheet" crossorigin href="./assets/index-BANRsTBV.css">
 </head>
 <body>
@@ -55,9 +55,9 @@
     <div class="workspace">
       <!-- Left Toolbar -->
       <aside class="toolbar">
-        <button class="tool-btn" data-tool="move" title="Move Tool (V)">
+        <button class="tool-btn" data-tool="transform" title="Transform Tool (V / R)">
           <span class="tool-icon">✥</span>
-          <span class="tool-label">Move</span>
+          <span class="tool-label">Transform</span>
         </button>
         <button class="tool-btn active" data-tool="select-rect" title="Rectangular Select (M)">
           <span class="tool-icon">⬚</span>
@@ -70,10 +70,6 @@
         <button class="tool-btn" data-tool="crop" title="Crop Tool (C)">
           <span class="tool-icon">✂️</span>
           <span class="tool-label">Crop</span>
-        </button>
-        <button class="tool-btn" data-tool="resize" title="Resize Image (R)">
-          <span class="tool-icon">📐</span>
-          <span class="tool-label">Resize</span>
         </button>
         <button class="tool-btn" data-tool="hue-saturation" title="Hue & Saturation (U)">
           <span class="tool-icon">🎭</span>
@@ -97,9 +93,19 @@
       <main class="stage-container" id="stage-container">
         <!-- Contextual Tool Settings Bar -->
         <div class="tool-options-bar" id="tool-options-bar">
-          <!-- Move Options -->
-          <div class="tool-option-group" id="opt-move" style="display: none;">
-            <span style="color: var(--text-muted);">Click and drag to move the active layer (or move selected area leaving transparency)</span>
+          <!-- Transform Options -->
+          <div class="tool-option-group" id="opt-transform" style="display: none;">
+            <span style="color: var(--text-muted);">Drag handles to transform the active layer (or move selected area leaving transparency)</span>
+            <label>Apply to:
+              <select id="resize-scope">
+                <option value="document">Document</option>
+                <option value="layer">Active Layer</option>
+              </select>
+            </label>
+            <label>Width: <input type="number" id="resize-w" style="width: 70px;" /></label>
+            <label>Height: <input type="number" id="resize-h" style="width: 70px;" /></label>
+            <label><input type="checkbox" id="resize-lock-ratio" checked /> Lock Aspect Ratio</label>
+            <button id="btn-apply-resize" class="btn btn-sm btn-primary">Apply Size</button>
           </div>
 
           <!-- Pan Options -->
@@ -143,14 +149,6 @@
           <div class="tool-option-group" id="opt-crop" style="display: none;">
             <span style="color: var(--text-muted);">Select an area or drag to define crop region:</span>
             <button id="btn-apply-crop" class="btn btn-sm btn-primary">Apply Crop</button>
-          </div>
-
-          <!-- Resize Options -->
-          <div class="tool-option-group" id="opt-resize" style="display: none;">
-            <label>Width: <input type="number" id="resize-w" style="width: 70px;" /></label>
-            <label>Height: <input type="number" id="resize-h" style="width: 70px;" /></label>
-            <label><input type="checkbox" id="resize-lock-ratio" checked /> Lock Aspect Ratio</label>
-            <button id="btn-apply-resize" class="btn btn-sm btn-primary">Apply Resize</button>
           </div>
 
           <!-- HSL Options -->
