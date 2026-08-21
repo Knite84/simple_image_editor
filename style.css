@@ -405,6 +405,10 @@ body {
   background: #393946;
 }
 
+.layer-item.selected {
+  border-color: var(--accent-color);
+}
+
 .layer-thumb {
   width: 32px;
   height: 32px;

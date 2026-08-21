@@ -8,15 +8,28 @@ export function setupLayersPanel(appState, onLayerChange) {
   const layersList = document.getElementById('layers-list');
   const btnAdd = document.getElementById('btn-add-layer');
   const btnDup = document.getElementById('btn-dup-layer');
+  const btnMerge = document.getElementById('btn-merge-layers');
   const btnDel = document.getElementById('btn-del-layer');
   const layerFileInput = document.getElementById('layer-file-input');
   const opacityInput = document.getElementById('layer-opacity');
   const opacityVal = document.getElementById('opacity-val');
 
+  function getMultiSelected() {
+    if (!Array.isArray(appState.multiSelectedLayerIds)) {
+      appState.multiSelectedLayerIds = [];
+    }
+    return appState.multiSelectedLayerIds;
+  }
+
+  function updateMergeButton() {
+    btnMerge.disabled = getMultiSelected().length < 2;
+  }
+
   function renderList() {
     if (!appState.document) return;
     const doc = appState.document;
     layersList.innerHTML = '';
+    const multiSelected = getMultiSelected();
 
     // Render layers reversed so top layer is visually at the top
     const displayLayers = [...doc.layers].reverse();
@@ -27,7 +40,7 @@ export function setupLayersPanel(appState, onLayerChange) {
       const isBottom = actualIdx === 0;
 
       const item = document.createElement('div');
-      item.className = `layer-item ${layer.id === doc.activeLayerId ? 'active' : ''}`;
+      item.className = `layer-item ${layer.id === doc.activeLayerId ? 'active' : ''} ${multiSelected.includes(layer.id) ? 'selected' : ''}`;
       
       // Thumbnail
       const thumb = document.createElement('canvas');
@@ -96,10 +109,40 @@ export function setupLayersPanel(appState, onLayerChange) {
       orderControls.appendChild(upBtn);
       orderControls.appendChild(downBtn);
 
-      item.onclick = () => {
-        doc.activeLayerId = layer.id;
-        opacityInput.value = Math.round(layer.opacity * 100);
-        opacityVal.textContent = `${Math.round(layer.opacity * 100)}%`;
+      item.onclick = (e) => {
+        const multi = getMultiSelected();
+
+        if (e.ctrlKey || e.metaKey) {
+          // Toggle membership in the multi-selection
+          const pos = multi.indexOf(layer.id);
+          if (pos >= 0) {
+            multi.splice(pos, 1);
+          } else {
+            multi.push(layer.id);
+            doc.activeLayerId = layer.id;
+          }
+        } else if (e.shiftKey && doc.activeLayerId) {
+          // Range select from the active layer to the clicked layer (z-order)
+          const startIdx = doc.layers.findIndex(l => l.id === doc.activeLayerId);
+          if (startIdx >= 0) {
+            const [lo, hi] = startIdx <= actualIdx ? [startIdx, actualIdx] : [actualIdx, startIdx];
+            multi.length = 0;
+            for (let i = lo; i <= hi; i++) {
+              multi.push(doc.layers[i].id);
+            }
+          }
+        } else {
+          // Plain click: single selection
+          multi.length = 0;
+          doc.activeLayerId = layer.id;
+        }
+
+        const active = getActiveLayer(doc);
+        if (active) {
+          opacityInput.value = Math.round(active.opacity * 100);
+          opacityVal.textContent = `${Math.round(active.opacity * 100)}%`;
+        }
+        updateMergeButton();
         onLayerChange();
       };
 
@@ -115,6 +158,7 @@ export function setupLayersPanel(appState, onLayerChange) {
       opacityInput.value = Math.round(active.opacity * 100);
       opacityVal.textContent = `${Math.round(active.opacity * 100)}%`;
     }
+    updateMergeButton();
   }
 
   // Import Image as New Layer
@@ -183,6 +227,45 @@ export function setupLayersPanel(appState, onLayerChange) {
     onLayerChange();
   };
 
+  // Merge Selected Layers
+  btnMerge.onclick = () => {
+    if (!appState.document) return;
+    const doc = appState.document;
+    const ids = getMultiSelected();
+    if (ids.length < 2) return;
+
+    // Resolve selected layers in document (z) order, bottom-most first
+    const selected = doc.layers.filter(l => ids.includes(l.id));
+    if (selected.length < 2) return;
+
+    appState.history.pushState(doc);
+
+    // Composite selected layers onto a document-sized canvas; the bottom-most
+    // selected layer becomes the merged layer (keeps its id and z-position)
+    const bottom = selected[0];
+    const mergedCanvas = document.createElement('canvas');
+    mergedCanvas.width = doc.width;
+    mergedCanvas.height = doc.height;
+    const mCtx = mergedCanvas.getContext('2d', { willReadFrequently: true });
+    for (const layer of selected) {
+      if (!layer.visible || layer.opacity <= 0) continue;
+      mCtx.globalAlpha = layer.opacity;
+      mCtx.drawImage(layer.canvas, layer.x, layer.y);
+    }
+
+    bottom.canvas = mergedCanvas;
+    bottom.x = 0;
+    bottom.y = 0;
+    bottom.opacity = 1;
+    bottom.visible = true;
+
+    doc.layers = doc.layers.filter(l => !ids.includes(l.id) || l.id === bottom.id);
+    doc.activeLayerId = bottom.id;
+    appState.multiSelectedLayerIds = [];
+    updateMergeButton();
+    onLayerChange();
+  };
+
   // Delete Layer
   btnDel.onclick = () => {
     if (!appState.document) return;
@@ -199,6 +282,10 @@ export function setupLayersPanel(appState, onLayerChange) {
     doc.layers.splice(idx, 1);
     const nextActive = doc.layers[Math.max(0, idx - 1)];
     doc.activeLayerId = nextActive.id;
+    const multi = getMultiSelected();
+    const pos = multi.indexOf(active.id);
+    if (pos >= 0) multi.splice(pos, 1);
+    updateMergeButton();
     onLayerChange();
   };
 

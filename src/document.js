@@ -107,9 +107,10 @@ export function getActiveLayer(doc) {
  * @param {Map|null} layerOverrides - Optional Map of layerId -> {x, y, w, h} used to
  *        draw a layer scaled/repositioned (e.g. live transform preview) without
  *        mutating its real pixels.
+ * @param {string|null} excludeLayerId - Optional layer id to omit from the composite
  * @returns {HTMLCanvasElement} Composite canvas
  */
-export function renderComposite(doc, layerOverrides = null) {
+export function renderComposite(doc, layerOverrides = null, excludeLayerId = null) {
   const compositeCanvas = document.createElement('canvas');
   compositeCanvas.width = Math.max(1, doc.width);
   compositeCanvas.height = Math.max(1, doc.height);
@@ -117,6 +118,7 @@ export function renderComposite(doc, layerOverrides = null) {
 
   for (const layer of doc.layers) {
     if (!layer.visible || layer.opacity <= 0) continue;
+    if (excludeLayerId && layer.id === excludeLayerId) continue;
 
     const override = layerOverrides ? layerOverrides.get(layer.id) : null;
 

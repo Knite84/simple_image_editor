@@ -12,8 +12,8 @@ import { showExportModal } from './tools/export.js';
 import { showBatchQueueModal } from './batch-queue.js';
 import { calculateAspectRatioBounds } from './tools/select-rect.js';
 import { interpolateStroke, applyStamp, getCircularBrushMask } from './tools/clone-brush.js';
-import { applyHslToImageData } from './tools/hue-saturation.js';
-import { getSelectionMask, getFeatheredBounds } from './selection.js';
+import { getLayerHslTargets, applyHslToImageData } from './tools/hue-saturation.js';
+
 import { getHandlePositions, hitTestHandles, computeHandleResize, HANDLE_IDS, CORNER_HANDLES, HANDLE_CURSORS } from './transform.js';
 
 // Load tool op handlers
@@ -34,6 +34,7 @@ export const appState = {
   history: new HistoryManager(20),
   recorder: new ActionRecorder(),
   layersUI: null,
+  multiSelectedLayerIds: [],
 
   // Viewport navigation & pan state
   isSpacePressed: false,
@@ -871,26 +872,35 @@ function updateHslPreview() {
     appState.hslProxyCanvas = document.createElement('canvas');
   }
   const proxy = appState.hslProxyCanvas;
-  proxy.width = appState.document.width;
-  proxy.height = appState.document.height;
+  proxy.width = doc.width;
+  proxy.height = doc.height;
   const pCtx = proxy.getContext('2d');
-  
-  // Render composite as base
-  const comp = renderComposite(appState.document);
-  pCtx.drawImage(comp, 0, 0);
 
-  const imgData = pCtx.getImageData(0, 0, proxy.width, proxy.height);
-  let maskData = null;
-  let bounds = null;
+  // HSL only ever affects the active layer, so the preview must too:
+  // composite everything except the active layer, then draw the active
+  // layer with the adjustment applied (mirroring the hue-saturation op)
+  const activeLayer = getActiveLayer(doc);
+  const base = renderComposite(doc, null, activeLayer ? activeLayer.id : null);
+  pCtx.drawImage(base, 0, 0);
 
-  if (appState.document.selection) {
-    const mask = getSelectionMask(appState.document.selection, appState.document.width, appState.document.height);
-    maskData = mask.getContext('2d').getImageData(0, 0, proxy.width, proxy.height);
-    bounds = getFeatheredBounds(appState.document.selection);
+  if (activeLayer && activeLayer.visible && activeLayer.opacity > 0) {
+    const lw = activeLayer.canvas.width;
+    const lh = activeLayer.canvas.height;
+    const tmp = document.createElement('canvas');
+    tmp.width = lw;
+    tmp.height = lh;
+    const tCtx = tmp.getContext('2d', { willReadFrequently: true });
+    tCtx.drawImage(activeLayer.canvas, 0, 0);
+
+    const imgData = tCtx.getImageData(0, 0, lw, lh);
+    const { maskData, bounds } = getLayerHslTargets(doc, activeLayer);
+    applyHslToImageData(imgData, maskData, h, s, l, bounds, lw, lh);
+    tCtx.putImageData(imgData, 0, 0);
+
+    pCtx.globalAlpha = activeLayer.opacity;
+    pCtx.drawImage(tmp, activeLayer.x, activeLayer.y);
+    pCtx.globalAlpha = 1;
   }
-
-  applyHslToImageData(imgData, maskData, h, s, l, bounds, proxy.width, proxy.height);
-  pCtx.putImageData(imgData, 0, 0);
 
   appState.isHslPreviewing = true;
   renderApp();

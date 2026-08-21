@@ -113,6 +113,46 @@ export function applyHslToImageData(imageData, maskData, deltaHue, deltaSat, del
   }
 }
 
+/**
+ * Builds layer-local HSL targets: the selection mask translated into the
+ * layer's coordinate space, plus processing bounds intersected with the
+ * layer rect. Returns full-layer bounds and no mask when there is no
+ * selection, so adjustments always apply to the active layer's own pixels
+ * regardless of its size/offset within the document.
+ */
+export function getLayerHslTargets(doc, layer) {
+  const lw = layer.canvas.width;
+  const lh = layer.canvas.height;
+
+  if (!doc.selection) {
+    return { maskData: null, bounds: { x: 0, y: 0, w: lw, h: lh } };
+  }
+
+  const docMask = getSelectionMask(doc.selection, doc.width, doc.height);
+  const localMask = document.createElement('canvas');
+  localMask.width = lw;
+  localMask.height = lh;
+  const lmCtx = localMask.getContext('2d', { willReadFrequently: true });
+  lmCtx.drawImage(docMask, -layer.x, -layer.y);
+  const maskData = lmCtx.getImageData(0, 0, lw, lh);
+
+  const fb = getFeatheredBounds(doc.selection);
+  const ix1 = Math.max(fb.x, layer.x);
+  const iy1 = Math.max(fb.y, layer.y);
+  const ix2 = Math.min(fb.x + fb.w, layer.x + lw);
+  const iy2 = Math.min(fb.y + fb.h, layer.y + lh);
+
+  return {
+    maskData,
+    bounds: {
+      x: Math.max(0, ix1 - layer.x),
+      y: Math.max(0, iy1 - layer.y),
+      w: Math.max(0, ix2 - ix1),
+      h: Math.max(0, iy2 - iy1)
+    }
+  };
+}
+
 registerOp('hue-saturation', (doc, params) => {
   const activeLayer = getActiveLayer(doc);
   if (!activeLayer) return doc;
@@ -128,16 +168,9 @@ registerOp('hue-saturation', (doc, params) => {
   const ctx = activeLayer.canvas.getContext('2d', { willReadFrequently: true });
   const imgData = ctx.getImageData(0, 0, activeLayer.canvas.width, activeLayer.canvas.height);
 
-  let maskData = null;
-  let bounds = null;
+  const { maskData, bounds } = getLayerHslTargets(doc, activeLayer);
 
-  if (doc.selection) {
-    const maskCanvas = getSelectionMask(doc.selection, doc.width, doc.height);
-    maskData = maskCanvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, doc.width, doc.height);
-    bounds = getFeatheredBounds(doc.selection);
-  }
-
-  applyHslToImageData(imgData, maskData, deltaHue, deltaSat, deltaLight, bounds, doc.width, doc.height);
+  applyHslToImageData(imgData, maskData, deltaHue, deltaSat, deltaLight, bounds, activeLayer.canvas.width, activeLayer.canvas.height);
   ctx.putImageData(imgData, 0, 0);
 
   return doc;
