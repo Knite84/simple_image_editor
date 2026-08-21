@@ -84,6 +84,7 @@ const btnZoomOut = document.getElementById('btn-zoom-out');
 const btnFitScreen = document.getElementById('btn-fit-screen');
 const zoomPercentage = document.getElementById('zoom-percentage');
 const docDimensions = document.getElementById('doc-dimensions');
+const layersPane = document.getElementById('tab-layers');
 
 // Tool options elements
 const toolButtons = document.querySelectorAll('.tool-btn');
@@ -1143,6 +1144,98 @@ window.addEventListener('paste', (e) => {
     }
   }
 });
+
+// Drag & Drop Image Files from File Explorer -> New Layer(s)
+function loadDroppedImageFile(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => resolve({ img, name: file.name });
+      img.onerror = () => resolve(null);
+      img.src = event.target.result;
+    };
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
+
+async function addDroppedImagesAsLayers(files) {
+  const results = (await Promise.all(files.map(loadDroppedImageFile))).filter(Boolean);
+  if (results.length === 0) return;
+
+  let doc = appState.document;
+  // No open document: first dropped image becomes the new document
+  if (!doc) {
+    loadNewImage(results[0].img, results[0].name);
+    doc = appState.document;
+    results.shift();
+  }
+  if (!doc || results.length === 0) return;
+
+  appState.history.pushState(doc);
+
+  for (const { img, name } of results) {
+    const imgW = img.naturalWidth || img.width;
+    const imgH = img.naturalHeight || img.height;
+    // Center layer in current document
+    const x = Math.round((doc.width - imgW) / 2);
+    const y = Math.round((doc.height - imgH) / 2);
+
+    const newL = createLayer(
+      null,
+      name.replace(/\.[^/.]+$/, ''),
+      imgW,
+      imgH,
+      img,
+      x,
+      y
+    );
+
+    doc.layers.push(newL);
+    doc.activeLayerId = newL.id;
+  }
+
+  appState.multiSelectedLayerIds = [];
+  renderApp();
+}
+
+function setupImageDropTarget(target) {
+  let dragDepth = 0;
+
+  function setHighlight(on) {
+    target.style.outline = on ? '2px dashed var(--accent-color)' : '';
+    target.style.outlineOffset = on ? '-2px' : '';
+  }
+
+  target.addEventListener('dragenter', (e) => {
+    if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes('Files')) return;
+    e.preventDefault();
+    dragDepth++;
+    setHighlight(true);
+  });
+
+  target.addEventListener('dragover', (e) => {
+    e.preventDefault(); // Required for drop to fire
+  });
+
+  target.addEventListener('dragleave', () => {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) setHighlight(false);
+  });
+
+  target.addEventListener('drop', (e) => {
+    e.preventDefault(); // Prevent browser opening the file
+    dragDepth = 0;
+    setHighlight(false);
+
+    const files = Array.from(e.dataTransfer?.files || []).filter(f => f.type.startsWith('image/'));
+    if (files.length > 0) addDroppedImagesAsLayers(files);
+  });
+}
+
+setupImageDropTarget(canvasViewport);
+setupImageDropTarget(layersPane);
 
 // Load sample / image functions
 export function loadNewImage(imageOrCanvas, filename = 'Image') {
