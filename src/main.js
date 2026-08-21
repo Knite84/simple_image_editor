@@ -67,7 +67,6 @@ const displayCanvas = document.getElementById('display-canvas');
 const overlayCanvas = document.getElementById('overlay-canvas');
 const canvasViewport = document.getElementById('canvas-viewport');
 const fileInput = document.getElementById('file-input');
-const btnSample = document.getElementById('btn-sample-image');
 const btnUndo = document.getElementById('btn-undo');
 const btnRedo = document.getElementById('btn-redo');
 const btnRecord = document.getElementById('btn-record');
@@ -1065,11 +1064,6 @@ fileInput.addEventListener('change', (e) => {
     img.src = event.target.result;
   };
   reader.readAsDataURL(file);
-});
-
-btnSample.addEventListener('click', () => {
-  const sample = generateSampleImage();
-  loadNewImage(sample, 'Sunset_Sample.png');
 });
 
 // Zoom Controls
