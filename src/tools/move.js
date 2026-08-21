@@ -5,7 +5,7 @@
 
 import { registerOp } from '../ops.js';
 import { getActiveLayer } from '../document.js';
-import { getSelectionMask, createLassoSelection, createRectSelection } from '../selection.js';
+import { getSelectionMask, translateSelection } from '../selection.js';
 
 /**
  * Op: Move Layer
@@ -33,7 +33,6 @@ registerOp('move-selection', (doc, params) => {
   if (dx === 0 && dy === 0) return doc;
 
   const sel = doc.selection;
-  const bounds = sel.bounds;
 
   // 1. Generate mask of selection
   const maskCanvas = getSelectionMask(sel, doc.width, doc.height);
@@ -79,22 +78,8 @@ registerOp('move-selection', (doc, params) => {
   // 3. Draw extracted content shifted by (dx, dy) onto active layer
   layerCtx.drawImage(extractCanvas, dx, dy);
 
-  // 4. Update selection bounds & path to new location
-  if (sel.type === 'rect') {
-    doc.selection = createRectSelection(
-      bounds.x + dx,
-      bounds.y + dy,
-      bounds.w,
-      bounds.h,
-      sel.feather
-    );
-  } else if (sel.type === 'lasso' && sel.points) {
-    const movedPoints = sel.points.map(p => ({
-      x: p.x + dx,
-      y: p.y + dy
-    }));
-    doc.selection = createLassoSelection(movedPoints, sel.feather);
-  }
+  // 4. Update selection geometry (all parts) to new location
+  doc.selection = translateSelection(sel, dx, dy);
 
   return doc;
 });

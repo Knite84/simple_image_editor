@@ -92,6 +92,15 @@ export function cloneDocument(doc) {
       path: doc.selection.path,
       bounds: { ...doc.selection.bounds },
       points: doc.selection.points ? doc.selection.points.map(p => ({ ...p })) : null,
+      parts: doc.selection.parts
+        ? doc.selection.parts.map(p => ({
+            type: p.type,
+            op: p.op === 'subtract' ? 'subtract' : 'add',
+            path: p.path,
+            bounds: { ...p.bounds },
+            points: p.points ? p.points.map(pt => ({ ...pt })) : null
+          }))
+        : null,
       feather: doc.selection.feather || 0
     } : null
   };

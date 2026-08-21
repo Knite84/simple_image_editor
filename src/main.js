@@ -13,6 +13,7 @@ import { showBatchQueueModal } from './batch-queue.js';
 import { calculateAspectRatioBounds } from './tools/select-rect.js';
 import { interpolateStroke, applyStamp, getCircularBrushMask } from './tools/clone-brush.js';
 import { getLayerHslTargets, applyHslToImageData } from './tools/hue-saturation.js';
+import { getSelectionMask, computeSelectionOutline } from './selection.js';
 
 import { getHandlePositions, hitTestHandles, computeHandleResize, HANDLE_IDS, CORNER_HANDLES, HANDLE_CURSORS } from './transform.js';
 
@@ -46,6 +47,7 @@ export const appState = {
   dragStartDocPos: null,
   currentDocPos: null,
   lassoPoints: [],
+  selDragMode: 'new', // 'new' | 'add' | 'subtract' for in-flight selection drags,
 
   // Move Tool state
   moveStartLayerPos: null,
@@ -93,6 +95,8 @@ const optRatioWidth = document.getElementById('opt-ratio-width');
 const optRatioHeight = document.getElementById('opt-ratio-height');
 const optRectFeather = document.getElementById('opt-rect-feather');
 const optLassoFeather = document.getElementById('opt-lasso-feather');
+const optRectMode = document.getElementById('opt-rect-mode');
+const optLassoMode = document.getElementById('opt-lasso-mode');
 const btnRectDeselect = document.getElementById('btn-rect-deselect');
 const btnLassoDeselect = document.getElementById('btn-lasso-deselect');
 
@@ -146,6 +150,17 @@ function getActiveRectRatio() {
   const h = parseFloat(optRatioHeight.value);
   if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return 'free';
   return `${w}:${h}`;
+}
+
+/**
+ * Resolves the effective selection mode for the active selection tool.
+ * Keyboard modifiers win over the Mode dropdown: Alt = Subtract, Shift = Add.
+ */
+function resolveSelectionMode(e) {
+  if (e && e.altKey) return 'subtract';
+  if (e && e.shiftKey) return 'add';
+  const select = appState.activeTool === 'select-lasso' ? optLassoMode : optRectMode;
+  return (select && select.value) || 'new';
 }
 
 /**
@@ -224,39 +239,152 @@ export function renderApp() {
  * Marching Ants & Selection / Brush Overlay Renderer
  */
 let marchingAntsOffset = 0;
+
+// Cached raster mask of the committed selection + scratch canvases for the
+// live add/subtract preview (reused across animation frames)
+const selectionPreviewCache = { key: null, canvas: null };
+const selectionOutlineCache = { key: null, result: null };
+const previewScratch = document.createElement('canvas');
+const previewTint = document.createElement('canvas');
+
+/**
+ * Combined-boundary outline for the committed selection (cached per selection
+ * object identity), so marching ants trace the merged region instead of each
+ * part's raw outline.
+ */
+function getCommittedSelectionOutline(doc) {
+  if (!doc.selection) return null;
+  if (selectionOutlineCache.key !== doc.selection || !selectionOutlineCache.result) {
+    selectionOutlineCache.result = computeSelectionOutline(doc.selection, doc.width, doc.height);
+    selectionOutlineCache.key = doc.selection;
+  }
+  return selectionOutlineCache.result;
+}
+
+function getCommittedSelectionMaskCanvas(doc) {
+  if (!doc.selection) return null;
+  if (selectionPreviewCache.key !== doc.selection ||
+      !selectionPreviewCache.canvas ||
+      selectionPreviewCache.canvas.width !== doc.width ||
+      selectionPreviewCache.canvas.height !== doc.height) {
+    selectionPreviewCache.canvas = getSelectionMask(doc.selection, doc.width, doc.height);
+    selectionPreviewCache.key = doc.selection;
+  }
+  return selectionPreviewCache.canvas;
+}
+
+/**
+ * Tints a white-alpha mask canvas with the given color (source-in fill)
+ */
+function tintMaskCanvas(maskCanvas, color, docW, docH) {
+  if (previewTint.width !== docW || previewTint.height !== docH) {
+    previewTint.width = docW;
+    previewTint.height = docH;
+  }
+  const tctx = previewTint.getContext('2d');
+  tctx.clearRect(0, 0, docW, docH);
+  tctx.globalCompositeOperation = 'source-over';
+  tctx.drawImage(maskCanvas, 0, 0);
+  tctx.globalCompositeOperation = 'source-in';
+  tctx.fillStyle = color;
+  tctx.fillRect(0, 0, docW, docH);
+  tctx.globalCompositeOperation = 'source-over';
+  return previewTint;
+}
+
 function renderOverlay() {
   if (!appState.document) return;
   const doc = appState.document;
   const ctx = overlayCanvas.getContext('2d');
   ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
-  // 1. Render active selection with marching ants
+  // 1. Render active selection with marching ants tracing the combined boundary
   if (doc.selection) {
+    const outline = getCommittedSelectionOutline(doc);
     ctx.save();
     ctx.lineWidth = 1.5;
-    ctx.lineDashOffset = marchingAntsOffset;
+    ctx.setLineDash([6, 6]);
+
+    const strokeOutline = (dashOffset) => {
+      ctx.lineDashOffset = dashOffset;
+      if (outline && outline.path) {
+        ctx.stroke(outline.path);
+      } else if (doc.selection.type === 'rect') {
+        const { x, y, w, h } = doc.selection.bounds;
+        ctx.strokeRect(x, y, w, h);
+      } else if (doc.selection.path) {
+        ctx.stroke(doc.selection.path);
+      }
+    };
 
     // Black background stroke
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.85)';
-    ctx.setLineDash([6, 6]);
-    if (doc.selection.type === 'rect') {
-      const { x, y, w, h } = doc.selection.bounds;
-      ctx.strokeRect(x, y, w, h);
-    } else if (doc.selection.path) {
-      ctx.stroke(doc.selection.path);
-    }
+    strokeOutline(marchingAntsOffset);
 
     // White foreground stroke
     ctx.strokeStyle = '#ffffff';
-    ctx.lineDashOffset = marchingAntsOffset + 6;
-    if (doc.selection.type === 'rect') {
-      const { x, y, w, h } = doc.selection.bounds;
-      ctx.strokeRect(x, y, w, h);
-    } else if (doc.selection.path) {
-      ctx.stroke(doc.selection.path);
-    }
+    strokeOutline(marchingAntsOffset + 6);
 
     ctx.restore();
+  }
+
+  // 1.2 Effective-selection tint: shows the actual combined masked area.
+  //     Multi-part selections always get a faint fill; during add/subtract
+  //     drags the in-flight shape is composited in so the union/difference
+  //     updates live while drawing.
+  const isSelectionDrag = appState.isPointerDown &&
+    (appState.activeTool === 'select-rect' || appState.activeTool === 'select-lasso');
+  const showResultTint = (doc.selection && doc.selection.parts && doc.selection.parts.length > 1) ||
+    (isSelectionDrag && appState.selDragMode !== 'new' && doc.selection);
+
+  if (showResultTint) {
+    let maskCanvas = getCommittedSelectionMaskCanvas(doc);
+
+    if (maskCanvas && isSelectionDrag && appState.selDragMode !== 'new') {
+      if (previewScratch.width !== overlayCanvas.width || previewScratch.height !== overlayCanvas.height) {
+        previewScratch.width = overlayCanvas.width;
+        previewScratch.height = overlayCanvas.height;
+      }
+      const sctx = previewScratch.getContext('2d');
+      sctx.clearRect(0, 0, previewScratch.width, previewScratch.height);
+      sctx.globalCompositeOperation = 'source-over';
+      sctx.drawImage(maskCanvas, 0, 0);
+
+      // Composite the in-flight shape into the mask copy
+      sctx.globalCompositeOperation = appState.selDragMode === 'subtract' ? 'destination-out' : 'source-over';
+      sctx.fillStyle = '#ffffff';
+      if (appState.activeTool === 'select-rect' && appState.dragStartDocPos && appState.currentDocPos) {
+        const inFlightBounds = calculateAspectRatioBounds(
+          appState.dragStartDocPos.x,
+          appState.dragStartDocPos.y,
+          appState.currentDocPos.x,
+          appState.currentDocPos.y,
+          getActiveRectRatio()
+        );
+        sctx.fillRect(inFlightBounds.x, inFlightBounds.y, inFlightBounds.w, inFlightBounds.h);
+      } else if (appState.activeTool === 'select-lasso' && appState.lassoPoints.length > 2) {
+        const inFlightPath = new Path2D();
+        inFlightPath.moveTo(appState.lassoPoints[0].x, appState.lassoPoints[0].y);
+        for (let i = 1; i < appState.lassoPoints.length; i++) {
+          inFlightPath.lineTo(appState.lassoPoints[i].x, appState.lassoPoints[i].y);
+        }
+        inFlightPath.closePath();
+        sctx.fill(inFlightPath);
+      }
+
+      maskCanvas = previewScratch;
+    }
+
+    if (maskCanvas) {
+      const tintColor = isSelectionDrag && appState.selDragMode === 'subtract' ? '#ef4444'
+        : isSelectionDrag && appState.selDragMode === 'add' ? '#10b981'
+        : '#3b82f6';
+      const tinted = tintMaskCanvas(maskCanvas, tintColor, overlayCanvas.width, overlayCanvas.height);
+      ctx.save();
+      ctx.globalAlpha = isSelectionDrag ? 0.3 : 0.14;
+      ctx.drawImage(tinted, 0, 0);
+      ctx.restore();
+    }
   }
 
   // 1.5 Render layer transform handles (Transform tool, no active selection)
@@ -300,18 +428,24 @@ function renderOverlay() {
           appState.currentDocPos.y,
           ratio
         );
+        const previewColor = appState.selDragMode === 'add' ? '#10b981'
+          : appState.selDragMode === 'subtract' ? '#ef4444'
+          : '#3b82f6';
         ctx.save();
-        ctx.strokeStyle = '#3b82f6';
+        ctx.strokeStyle = previewColor;
         ctx.lineWidth = 1.5;
         ctx.setLineDash([4, 4]);
         ctx.strokeRect(bounds.x, bounds.y, bounds.w, bounds.h);
-        ctx.fillStyle = 'rgba(59, 130, 246, 0.1)';
+        ctx.fillStyle = `${previewColor}1a`;
         ctx.fillRect(bounds.x, bounds.y, bounds.w, bounds.h);
         ctx.restore();
       }
     } else if (appState.activeTool === 'select-lasso' && appState.lassoPoints.length > 1) {
+      const previewColor = appState.selDragMode === 'add' ? '#10b981'
+        : appState.selDragMode === 'subtract' ? '#ef4444'
+        : '#3b82f6';
       ctx.save();
-      ctx.strokeStyle = '#3b82f6';
+      ctx.strokeStyle = previewColor;
       ctx.lineWidth = 1.5;
       ctx.setLineDash([4, 4]);
       ctx.beginPath();
@@ -500,6 +634,10 @@ canvasViewport.addEventListener('pointerdown', (e) => {
     }
   }
 
+  if (appState.activeTool === 'select-rect' || appState.activeTool === 'select-lasso') {
+    appState.selDragMode = resolveSelectionMode(e);
+  }
+
   appState.isPointerDown = true;
   appState.dragStartDocPos = docPos;
   appState.currentDocPos = docPos;
@@ -580,6 +718,10 @@ window.addEventListener('pointermove', (e) => {
   }
 
   if (appState.isPointerDown) {
+    if (appState.activeTool === 'select-rect' || appState.activeTool === 'select-lasso') {
+      appState.selDragMode = resolveSelectionMode(e);
+    }
+
     if (appState.activeTool === 'transform') {
       if (appState.document.selection) {
         appState.moveDelta = {
@@ -679,6 +821,8 @@ window.addEventListener('pointerup', (e) => {
   } else if (appState.activeTool === 'select-rect') {
     const ratio = getActiveRectRatio();
     const feather = parseInt(optRectFeather.value, 10) || 0;
+    const mode = appState.selDragMode || 'new';
+    appState.selDragMode = 'new';
     const bounds = calculateAspectRatioBounds(
       appState.dragStartDocPos.x,
       appState.dragStartDocPos.y,
@@ -689,20 +833,22 @@ window.addEventListener('pointerup', (e) => {
     if (bounds.w > 3 && bounds.h > 3) {
       executeOp({
         name: 'select-rect',
-        params: { bounds, feather }
+        params: { bounds, feather, mode }
       });
-    } else if (appState.document.selection) {
+    } else if (appState.document.selection && mode === 'new') {
       // Plain click (no drag) clears the current selection
       executeOp({ name: 'clear-selection' });
     }
   } else if (appState.activeTool === 'select-lasso') {
     const feather = parseInt(optLassoFeather.value, 10) || 0;
+    const mode = appState.selDragMode || 'new';
+    appState.selDragMode = 'new';
     if (appState.lassoPoints.length >= 3) {
       executeOp({
         name: 'select-lasso',
-        params: { points: appState.lassoPoints, feather }
+        params: { points: appState.lassoPoints, feather, mode }
       });
-    } else if (appState.document.selection) {
+    } else if (appState.document.selection && mode === 'new') {
       // Plain click (no drag) clears the current selection
       executeOp({ name: 'clear-selection' });
     }

@@ -133,6 +133,13 @@
             <label>Feather:
               <input type="number" id="opt-rect-feather" min="0" max="100" value="0" style="width: 55px;" /> px
             </label>
+            <label>Mode:
+              <select id="opt-rect-mode" title="New replaces the selection; Add (Shift) and Subtract (Alt) modify it">
+                <option value="new">New</option>
+                <option value="add">Add (Shift)</option>
+                <option value="subtract">Subtract (Alt)</option>
+              </select>
+            </label>
             <button id="btn-rect-deselect" class="btn btn-sm btn-secondary">Clear Selection</button>
           </div>
 
@@ -140,6 +147,13 @@
           <div class="tool-option-group" id="opt-select-lasso" style="display: none;">
             <label>Feather:
               <input type="number" id="opt-lasso-feather" min="0" max="100" value="0" style="width: 55px;" /> px
+            </label>
+            <label>Mode:
+              <select id="opt-lasso-mode" title="New replaces the selection; Add (Shift) and Subtract (Alt) modify it">
+                <option value="new">New</option>
+                <option value="add">Add (Shift)</option>
+                <option value="subtract">Subtract (Alt)</option>
+              </select>
             </label>
             <button id="btn-lasso-deselect" class="btn btn-sm btn-secondary">Clear Selection</button>
           </div>

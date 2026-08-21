@@ -2,20 +2,33 @@
  * Rectangular Selection Tool & Op
  */
 
-import { createRectSelection, createLassoSelection } from '../selection.js';
+import { createRectSelection, createRectPart, combineSelection, getSelectionParts, createCompositeSelection } from '../selection.js';
 import { registerOp } from '../ops.js';
 
 /**
  * Register 'select-rect' op
+ * params.mode: 'new' (replace) | 'add' | 'subtract' — add/subtract combine with existing selection
  */
 registerOp('select-rect', (doc, params) => {
+  const mode = (params && params.mode) || 'new';
+
   if (!params || !params.bounds) {
-    doc.selection = null;
+    if (mode === 'new') doc.selection = null;
     return doc;
   }
   const { x, y, w, h } = params.bounds;
   const feather = params.feather || 0;
-  doc.selection = createRectSelection(x, y, w, h, feather);
+
+  // Add/subtract with no selection to modify behaves as a fresh selection
+  const effectiveMode = doc.selection ? mode : 'new';
+
+  if (effectiveMode !== 'new') {
+    const part = createRectPart(x, y, w, h);
+    part.op = effectiveMode === 'subtract' ? 'subtract' : 'add';
+    doc.selection = combineSelection(doc.selection, part, feather);
+  } else {
+    doc.selection = createRectSelection(x, y, w, h, feather);
+  }
   return doc;
 });
 
@@ -32,13 +45,7 @@ registerOp('set-selection-feather', (doc, params) => {
   if (!sel) return doc;
 
   const feather = Math.max(0, params.feather || 0);
-
-  if (sel.type === 'rect') {
-    const { x, y, w, h } = sel.bounds;
-    doc.selection = createRectSelection(x, y, w, h, feather);
-  } else if (sel.points && sel.points.length >= 3) {
-    doc.selection = createLassoSelection(sel.points, feather);
-  }
+  doc.selection = createCompositeSelection(getSelectionParts(sel), feather);
 
   return doc;
 });
