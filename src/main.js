@@ -344,7 +344,15 @@ canvasViewport.addEventListener('wheel', (e) => {
  * Setup Tool Switcher
  */
 function setActiveTool(toolName) {
+  const previousTool = appState.activeTool;
   appState.activeTool = toolName;
+
+  // Discard unapplied HSL preview state when leaving the Hue/Sat tool,
+  // so adjustments don't leak into work on a new selection
+  if (previousTool === 'hue-saturation' && toolName !== 'hue-saturation') {
+    resetHslPreview();
+  }
+
   toolButtons.forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tool === toolName);
   });
@@ -667,6 +675,17 @@ btnApplyResize.onclick = () => {
 };
 
 // HSL Proxy Preview & Apply
+function resetHslPreview() {
+  hslH.value = 0;
+  hslS.value = 0;
+  hslL.value = 0;
+  hslHVal.textContent = '0°';
+  hslSVal.textContent = '0%';
+  hslLVal.textContent = '0%';
+  appState.isHslPreviewing = false;
+  appState.hslProxyCanvas = null;
+}
+
 function updateHslPreview() {
   if (!appState.document) return;
   const h = parseInt(hslH.value, 10);
@@ -718,10 +737,8 @@ hslS.oninput = updateHslPreview;
 hslL.oninput = updateHslPreview;
 
 btnResetHsl.onclick = () => {
-  hslH.value = 0;
-  hslS.value = 0;
-  hslL.value = 0;
-  updateHslPreview();
+  resetHslPreview();
+  renderApp();
 };
 
 btnApplyHsl.onclick = () => {
@@ -729,19 +746,13 @@ btnApplyHsl.onclick = () => {
   const s = parseInt(hslS.value, 10);
   const l = parseInt(hslL.value, 10);
 
-  appState.isHslPreviewing = false;
+  resetHslPreview();
   if (h !== 0 || s !== 0 || l !== 0) {
     executeOp({
       name: 'hue-saturation',
       params: { hue: h, saturation: s, lightness: l }
     });
   }
-  hslH.value = 0;
-  hslS.value = 0;
-  hslL.value = 0;
-  hslHVal.textContent = '0°';
-  hslSVal.textContent = '0%';
-  hslLVal.textContent = '0%';
 };
 
 // Delete Action
