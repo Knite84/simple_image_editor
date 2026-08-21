@@ -289,6 +289,16 @@ export function setupLayersPanel(appState, onLayerChange) {
     onLayerChange();
   };
 
+  // Layer Opacity
+  opacityInput.oninput = () => {
+    if (!appState.document) return;
+    const active = getActiveLayer(appState.document);
+    if (!active) return;
+    active.opacity = Math.max(0, Math.min(1, (parseInt(opacityInput.value, 10) || 0) / 100));
+    opacityVal.textContent = `${opacityInput.value}%`;
+    onLayerChange();
+  };
+
   return {
     render: renderList
   };
