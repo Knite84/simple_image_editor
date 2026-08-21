@@ -13,7 +13,7 @@ import { showBatchQueueModal } from './batch-queue.js';
 import { calculateAspectRatioBounds } from './tools/select-rect.js';
 import { interpolateStroke, applyStamp, getCircularBrushMask } from './tools/clone-brush.js';
 import { applyHslToImageData } from './tools/hue-saturation.js';
-import { getSelectionMask } from './selection.js';
+import { getSelectionMask, getFeatheredBounds } from './selection.js';
 
 // Load tool op handlers
 import './tools/select-rect.js';
@@ -739,7 +739,7 @@ function updateHslPreview() {
   if (appState.document.selection) {
     const mask = getSelectionMask(appState.document.selection, appState.document.width, appState.document.height);
     maskData = mask.getContext('2d').getImageData(0, 0, proxy.width, proxy.height);
-    bounds = appState.document.selection.bounds;
+    bounds = getFeatheredBounds(appState.document.selection);
   }
 
   applyHslToImageData(imgData, maskData, h, s, l, bounds, proxy.width, proxy.height);

@@ -4,7 +4,7 @@
 
 import { registerOp } from '../ops.js';
 import { getActiveLayer } from '../document.js';
-import { getSelectionMask } from '../selection.js';
+import { getSelectionMask, getFeatheredBounds } from '../selection.js';
 
 // RGB <-> HSL Math Helpers
 export function rgbToHsl(r, g, b) {
@@ -134,7 +134,7 @@ registerOp('hue-saturation', (doc, params) => {
   if (doc.selection) {
     const maskCanvas = getSelectionMask(doc.selection, doc.width, doc.height);
     maskData = maskCanvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, doc.width, doc.height);
-    bounds = doc.selection.bounds;
+    bounds = getFeatheredBounds(doc.selection);
   }
 
   applyHslToImageData(imgData, maskData, deltaHue, deltaSat, deltaLight, bounds, doc.width, doc.height);

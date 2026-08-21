@@ -64,6 +64,23 @@ export function createLassoSelection(points, feather = 0) {
 }
 
 /**
+ * Returns selection bounds expanded by the feather spread so pixel operations
+ * don't clip the outward feather gradient. The mask blur is two sequential
+ * box-blur passes of radius r, so alpha spreads up to 2r beyond the geometric
+ * bounds. Consumers still clamp these to document dimensions.
+ */
+export function getFeatheredBounds(selection) {
+  const { x, y, w, h } = selection.bounds;
+  const pad = Math.ceil((selection.feather || 0) * 2);
+  return {
+    x: x - pad,
+    y: y - pad,
+    w: w + pad * 2,
+    h: h + pad * 2
+  };
+}
+
+/**
  * Fast 1D Box Blur pass for deterministic cross-browser alpha mask feathering
  */
 function boxBlurH(scl, tcl, w, h, r) {

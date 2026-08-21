@@ -5,7 +5,7 @@
 
 import { registerOp } from '../ops.js';
 import { getActiveLayer } from '../document.js';
-import { getSelectionMask } from '../selection.js';
+import { getSelectionMask, getFeatheredBounds } from '../selection.js';
 
 function parseHexColor(hex) {
   let c = hex.replace('#', '');
@@ -33,7 +33,7 @@ registerOp('delete', (doc, params) => {
   const layerImgData = layerCtx.getImageData(0, 0, activeLayer.canvas.width, activeLayer.canvas.height);
   const layerData = layerImgData.data;
 
-  const bounds = doc.selection.bounds;
+  const bounds = getFeatheredBounds(doc.selection);
   const startX = Math.max(0, bounds.x);
   const startY = Math.max(0, bounds.y);
   const endX = Math.min(doc.width, bounds.x + bounds.w);
