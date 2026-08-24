@@ -22,6 +22,7 @@ import './tools/select-rect.js';
 import './tools/select-lasso.js';
 import './tools/crop.js';
 import './tools/resize.js';
+import './tools/rotate.js';
 import './tools/hue-saturation.js';
 import './tools/delete.js';
 import './tools/clone-brush.js';
@@ -77,6 +78,8 @@ const canvasViewport = document.getElementById('canvas-viewport');
 const fileInput = document.getElementById('file-input');
 const btnUndo = document.getElementById('btn-undo');
 const btnRedo = document.getElementById('btn-redo');
+const btnRotateCw = document.getElementById('btn-rotate-cw');
+const btnRotateCcw = document.getElementById('btn-rotate-ccw');
 const btnRecord = document.getElementById('btn-record');
 const recordBtnLabel = document.getElementById('record-btn-label');
 const btnBatchModal = document.getElementById('btn-batch-modal');
@@ -892,6 +895,14 @@ window.addEventListener('pointerup', (e) => {
 // Clear Selection
 btnRectDeselect.onclick = () => executeOp({ name: 'clear-selection' });
 btnLassoDeselect.onclick = () => executeOp({ name: 'clear-selection' });
+
+// Rotate Active Layer 90°
+btnRotateCw.onclick = () => {
+  if (appState.document) executeOp({ name: 'rotate-layer', params: { direction: 'cw' } });
+};
+btnRotateCcw.onclick = () => {
+  if (appState.document) executeOp({ name: 'rotate-layer', params: { direction: 'ccw' } });
+};
 
 // Feather applies to the active selection immediately (select first, feather after)
 const applySelectionFeather = (featherInput) => {
