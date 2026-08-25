@@ -58,6 +58,9 @@ export const appState = {
   transformDrag: null,   // { layerId, handleId, startRect, previewRect }
   transformHover: null,  // hovered handle id or null
 
+  // Canvas-edge snap guides while dragging a layer (Transform tool)
+  snapGuides: null,      // { vertical: number[], horizontal: number[] }
+
   // Clone Brush state
   cloneSource: null, // { x, y }
   isSettingCloneSource: false,
@@ -109,6 +112,7 @@ const resizeH = document.getElementById('resize-h');
 const resizeScope = document.getElementById('resize-scope');
 const resizeLockRatio = document.getElementById('resize-lock-ratio');
 const btnApplyResize = document.getElementById('btn-apply-resize');
+const snapToCanvasInput = document.getElementById('snap-to-canvas');
 
 const hslH = document.getElementById('hsl-h');
 const hslS = document.getElementById('hsl-s');
@@ -141,6 +145,10 @@ appState.viewport = new Viewport(canvasViewport, displayCanvas);
 // Initialize Layers Panel
 appState.layersUI = setupLayersPanel(appState, () => {
   renderApp();
+}, () => {
+  // A photo was just added as a layer: make Transform active so it can be
+  // immediately moved/resized into place
+  activateTransformForNewLayer();
 });
 
 /**
@@ -197,8 +205,6 @@ export function renderApp() {
   if (displayCanvas.width !== doc.width || displayCanvas.height !== doc.height) {
     displayCanvas.width = doc.width;
     displayCanvas.height = doc.height;
-    overlayCanvas.width = doc.width;
-    overlayCanvas.height = doc.height;
   }
 
   // Draw Composite
@@ -220,10 +226,6 @@ export function renderApp() {
   docDimensions.textContent = `${doc.width} × ${doc.height} px`;
   zoomPercentage.textContent = `${Math.round(appState.viewport.zoom * 100)}%`;
   appState.viewport.updateTransform(doc);
-
-  // Sync overlay canvas CSS size to display canvas so pointer coords align correctly
-  overlayCanvas.style.width = displayCanvas.style.width;
-  overlayCanvas.style.height = displayCanvas.style.height;
 
   // Update Resize inputs if not focused
   if (document.activeElement !== resizeW && document.activeElement !== resizeH) {
@@ -298,8 +300,23 @@ function tintMaskCanvas(maskCanvas, color, docW, docH) {
 function renderOverlay() {
   if (!appState.document) return;
   const doc = appState.document;
+
+  // The overlay covers the whole viewport (not just the document) so things
+  // like transform anchors stay visible when a layer extends past the canvas
+  if (overlayCanvas.width !== canvasViewport.clientWidth || overlayCanvas.height !== canvasViewport.clientHeight) {
+    overlayCanvas.width = canvasViewport.clientWidth;
+    overlayCanvas.height = canvasViewport.clientHeight;
+  }
+
   const ctx = overlayCanvas.getContext('2d');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+  // Map document coordinates onto viewport pixels for all drawing below
+  const vpRect = canvasViewport.getBoundingClientRect();
+  const canvasRect = displayCanvas.getBoundingClientRect();
+  const viewScale = doc.width > 0 ? canvasRect.width / doc.width : appState.viewport.zoom;
+  ctx.setTransform(viewScale, 0, 0, viewScale, canvasRect.left - vpRect.left, canvasRect.top - vpRect.top);
 
   // 1. Render active selection with marching ants tracing the combined boundary
   if (doc.selection) {
@@ -344,9 +361,9 @@ function renderOverlay() {
     let maskCanvas = getCommittedSelectionMaskCanvas(doc);
 
     if (maskCanvas && isSelectionDrag && appState.selDragMode !== 'new') {
-      if (previewScratch.width !== overlayCanvas.width || previewScratch.height !== overlayCanvas.height) {
-        previewScratch.width = overlayCanvas.width;
-        previewScratch.height = overlayCanvas.height;
+      if (previewScratch.width !== doc.width || previewScratch.height !== doc.height) {
+        previewScratch.width = doc.width;
+        previewScratch.height = doc.height;
       }
       const sctx = previewScratch.getContext('2d');
       sctx.clearRect(0, 0, previewScratch.width, previewScratch.height);
@@ -382,7 +399,7 @@ function renderOverlay() {
       const tintColor = isSelectionDrag && appState.selDragMode === 'subtract' ? '#ef4444'
         : isSelectionDrag && appState.selDragMode === 'add' ? '#10b981'
         : '#3b82f6';
-      const tinted = tintMaskCanvas(maskCanvas, tintColor, overlayCanvas.width, overlayCanvas.height);
+      const tinted = tintMaskCanvas(maskCanvas, tintColor, doc.width, doc.height);
       ctx.save();
       ctx.globalAlpha = isSelectionDrag ? 0.3 : 0.14;
       ctx.drawImage(tinted, 0, 0);
@@ -417,6 +434,26 @@ function renderOverlay() {
       }
       ctx.restore();
     }
+  }
+
+  // 1.6 Canvas-edge snap guides during Transform layer drags
+  if (appState.snapGuides && (appState.snapGuides.vertical.length || appState.snapGuides.horizontal.length)) {
+    const ext = Math.max(doc.width, doc.height);
+    ctx.save();
+    ctx.strokeStyle = '#ec4899';
+    ctx.lineWidth = 1 / viewScale;
+    ctx.setLineDash([6 / viewScale, 4 / viewScale]);
+    ctx.beginPath();
+    for (const gx of appState.snapGuides.vertical) {
+      ctx.moveTo(gx, -ext);
+      ctx.lineTo(gx, doc.height + ext);
+    }
+    for (const gy of appState.snapGuides.horizontal) {
+      ctx.moveTo(-ext, gy);
+      ctx.lineTo(doc.width + ext, gy);
+    }
+    ctx.stroke();
+    ctx.restore();
   }
 
   // 2. Render live dragging selection preview
@@ -501,6 +538,11 @@ function animateMarchingAnts() {
 }
 requestAnimationFrame(animateMarchingAnts);
 
+// Keep the viewport-sized overlay in sync on window resizes
+window.addEventListener('resize', () => {
+  if (appState.document) renderOverlay();
+});
+
 /**
  * Setup Tool Switcher
  */
@@ -533,6 +575,8 @@ function setActiveTool(toolName) {
     resetHslPreview();
   }
 
+  appState.snapGuides = null;
+
   toolButtons.forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tool === toolName);
   });
@@ -562,6 +606,16 @@ toolButtons.forEach(btn => {
 });
 
 /**
+ * Activates the Transform tool after an image was imported as a layer.
+ * Also points the size controls at the active layer, since repositioning /
+ * resizing that fresh layer is the expected next action.
+ */
+function activateTransformForNewLayer() {
+  resizeScope.value = 'layer';
+  setActiveTool('transform');
+}
+
+/**
  * Commits an interactive layer transform drag via the transform-layer op.
  * The layer's real pixels were never mutated during the preview, so the
  * op's history snapshot captures the pre-drag state automatically.
@@ -587,6 +641,47 @@ function commitTransformDrag() {
 function cancelTransformDrag() {
   appState.transformDrag = null;
   renderApp();
+}
+
+/**
+ * Snaps a dragging layer rect to the canvas edges/center when enabled.
+ * Populates appState.snapGuides with the doc-space lines that matched, so
+ * renderOverlay can draw them. Threshold is 8 screen px regardless of zoom.
+ */
+function applySnapToCanvas(rect) {
+  const doc = appState.document;
+  const guides = { vertical: [], horizontal: [] };
+  appState.snapGuides = guides;
+  if (!snapToCanvasInput.checked) return rect;
+
+  const threshold = 8 / (appState.viewport.zoom || 1);
+  let x = rect.x;
+  let y = rect.y;
+
+  const xTargets = [
+    { pos: 0, delta: -x },
+    { pos: doc.width, delta: doc.width - (rect.x + rect.w) },
+    { pos: doc.width / 2, delta: doc.width / 2 - (rect.x + rect.w / 2) }
+  ];
+  const yTargets = [
+    { pos: 0, delta: -y },
+    { pos: doc.height, delta: doc.height - (rect.y + rect.h) },
+    { pos: doc.height / 2, delta: doc.height / 2 - (rect.y + rect.h / 2) }
+  ];
+
+  xTargets.sort((a, b) => Math.abs(a.delta) - Math.abs(b.delta));
+  yTargets.sort((a, b) => Math.abs(a.delta) - Math.abs(b.delta));
+
+  if (Math.abs(xTargets[0].delta) <= threshold) {
+    x += xTargets[0].delta;
+    guides.vertical.push(xTargets[0].pos);
+  }
+  if (Math.abs(yTargets[0].delta) <= threshold) {
+    y += yTargets[0].delta;
+    guides.horizontal.push(yTargets[0].pos);
+  }
+
+  return { x: Math.round(x), y: Math.round(y) };
 }
 
 /**
@@ -737,8 +832,15 @@ window.addEventListener('pointermove', (e) => {
         if (activeLayer && appState.moveStartLayerPos) {
           const dx = docPos.x - appState.dragStartDocPos.x;
           const dy = docPos.y - appState.dragStartDocPos.y;
-          activeLayer.x = appState.moveStartLayerPos.x + dx;
-          activeLayer.y = appState.moveStartLayerPos.y + dy;
+          const free = {
+            x: appState.moveStartLayerPos.x + dx,
+            y: appState.moveStartLayerPos.y + dy,
+            w: activeLayer.canvas.width,
+            h: activeLayer.canvas.height
+          };
+          const snapped = applySnapToCanvas(free);
+          activeLayer.x = snapped.x;
+          activeLayer.y = snapped.y;
           renderApp();
         }
       }
@@ -803,6 +905,7 @@ window.addEventListener('pointerup', (e) => {
       if (activeLayer && appState.moveStartLayerPos) {
         const finalX = activeLayer.x;
         const finalY = activeLayer.y;
+        appState.snapGuides = null;
         // Reset layer x, y before executeOp so pushState captures original position
         activeLayer.x = appState.moveStartLayerPos.x;
         activeLayer.y = appState.moveStartLayerPos.y;
@@ -1289,6 +1392,7 @@ window.addEventListener('paste', (e) => {
 
               doc.layers.push(newL);
               doc.activeLayerId = newL.id;
+              activateTransformForNewLayer();
               renderApp();
             }
           };
@@ -1354,6 +1458,7 @@ async function addDroppedImagesAsLayers(files) {
   }
 
   appState.multiSelectedLayerIds = [];
+  activateTransformForNewLayer();
   renderApp();
 }
 

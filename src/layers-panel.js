@@ -4,7 +4,7 @@
 
 import { createLayer, cloneLayer, getActiveLayer } from './document.js';
 
-export function setupLayersPanel(appState, onLayerChange) {
+export function setupLayersPanel(appState, onLayerChange, onImageImported = null) {
   const layersList = document.getElementById('layers-list');
   const btnAdd = document.getElementById('btn-add-layer');
   const btnDup = document.getElementById('btn-dup-layer');
@@ -219,6 +219,7 @@ export function setupLayersPanel(appState, onLayerChange) {
         doc.layers.push(newL);
         doc.activeLayerId = newL.id;
         layerFileInput.value = '';
+        if (onImageImported) onImageImported();
         onLayerChange();
       };
       img.src = event.target.result;

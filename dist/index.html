@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Photo Editor - Local Web Studio</title>
-  <script type="module" crossorigin src="./assets/index-DelMQ6Tw.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-C9WEDbkb.css">
+  <script type="module" crossorigin src="./assets/index-BCoxCOqB.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-BRWrUICp.css">
 </head>
 <body>
   <div id="app">
@@ -114,6 +114,7 @@
             <label>Width: <input type="number" id="resize-w" style="width: 70px;" /></label>
             <label>Height: <input type="number" id="resize-h" style="width: 70px;" /></label>
             <label><input type="checkbox" id="resize-lock-ratio" checked /> Lock Aspect Ratio</label>
+            <label title="While dragging, snap layer edges and center to the canvas edges and center"><input type="checkbox" id="snap-to-canvas" checked /> Snap to Canvas</label>
             <button id="btn-apply-resize" class="btn btn-sm btn-primary">Apply Size</button>
           </div>
 
@@ -204,8 +205,8 @@
         <div class="canvas-viewport" id="canvas-viewport">
           <div class="canvas-wrapper" id="canvas-wrapper">
             <canvas id="display-canvas"></canvas>
-            <canvas id="overlay-canvas"></canvas>
           </div>
+          <canvas id="overlay-canvas"></canvas>
         </div>
 
         <!-- Viewport Bottom Control Bar -->

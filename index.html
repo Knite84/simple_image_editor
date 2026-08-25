@@ -113,6 +113,7 @@
             <label>Width: <input type="number" id="resize-w" style="width: 70px;" /></label>
             <label>Height: <input type="number" id="resize-h" style="width: 70px;" /></label>
             <label><input type="checkbox" id="resize-lock-ratio" checked /> Lock Aspect Ratio</label>
+            <label title="While dragging, snap layer edges and center to the canvas edges and center"><input type="checkbox" id="snap-to-canvas" checked /> Snap to Canvas</label>
             <button id="btn-apply-resize" class="btn btn-sm btn-primary">Apply Size</button>
           </div>
 
@@ -203,8 +204,8 @@
         <div class="canvas-viewport" id="canvas-viewport">
           <div class="canvas-wrapper" id="canvas-wrapper">
             <canvas id="display-canvas"></canvas>
-            <canvas id="overlay-canvas"></canvas>
           </div>
+          <canvas id="overlay-canvas"></canvas>
         </div>
 
         <!-- Viewport Bottom Control Bar -->
