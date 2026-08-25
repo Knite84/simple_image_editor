@@ -272,7 +272,6 @@ body {
 
 .canvas-wrapper {
   position: relative;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
   user-select: none;
   transform-origin: center center;
 }
@@ -280,6 +279,9 @@ body {
 #display-canvas {
   display: block;
   image-rendering: auto;
+  /* Shadow lives on the canvas (not the wrapper) so it follows the document
+     when the viewport pans — otherwise it looks like a second, static canvas */
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
 }
 
 #overlay-canvas {
