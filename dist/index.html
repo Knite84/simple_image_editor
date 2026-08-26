@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Photo Editor - Local Web Studio</title>
-  <script type="module" crossorigin src="./assets/index-BDF6Lw9t.js"></script>
+  <script type="module" crossorigin src="./assets/index-ikArcUY2.js"></script>
   <link rel="stylesheet" crossorigin href="./assets/index-Cd8orWNs.css">
 </head>
 <body>
@@ -83,6 +83,10 @@
         <button class="tool-btn" data-tool="hue-saturation" title="Hue & Saturation (U)">
           <span class="tool-icon">🎭</span>
           <span class="tool-label">HSL</span>
+        </button>
+        <button class="tool-btn" data-tool="blur" title="Blur (B)">
+          <span class="tool-icon">🌫️</span>
+          <span class="tool-label">Blur</span>
         </button>
         <button class="tool-btn" data-tool="delete" title="Delete / Fill (Del)">
           <span class="tool-icon">🗑️</span>
@@ -182,6 +186,14 @@
             <label>Light: <span id="hsl-l-val">0%</span> <input type="range" id="hsl-l" min="-100" max="100" value="0" style="width: 80px;" /></label>
             <button id="btn-apply-hsl" class="btn btn-sm btn-primary">Apply HSL</button>
             <button id="btn-reset-hsl" class="btn btn-sm btn-secondary">Reset</button>
+          </div>
+
+          <!-- Blur Options -->
+          <div class="tool-option-group" id="opt-blur" style="display: none;">
+            <label>Strength: <span id="blur-strength-val">50%</span> <input type="range" id="blur-strength" min="0" max="100" value="50" style="width: 80px;" /></label>
+            <label>Size: <span id="blur-size-val">8px</span> <input type="range" id="blur-size" min="1" max="60" value="8" style="width: 80px;" /></label>
+            <button id="btn-apply-blur" class="btn btn-sm btn-primary">Apply Blur</button>
+            <span style="color: var(--text-muted);">Applies to the active layer inside the current selection, or the whole layer if none</span>
           </div>
 
           <!-- Delete Options -->

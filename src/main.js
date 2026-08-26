@@ -24,6 +24,7 @@ import './tools/crop.js';
 import './tools/resize.js';
 import './tools/rotate.js';
 import './tools/hue-saturation.js';
+import './tools/blur.js';
 import './tools/delete.js';
 import './tools/clone-brush.js';
 import './tools/move.js';
@@ -122,6 +123,12 @@ const hslSVal = document.getElementById('hsl-s-val');
 const hslLVal = document.getElementById('hsl-l-val');
 const btnApplyHsl = document.getElementById('btn-apply-hsl');
 const btnResetHsl = document.getElementById('btn-reset-hsl');
+
+const blurStrength = document.getElementById('blur-strength');
+const blurStrengthVal = document.getElementById('blur-strength-val');
+const blurSize = document.getElementById('blur-size');
+const blurSizeVal = document.getElementById('blur-size-val');
+const btnApplyBlur = document.getElementById('btn-apply-blur');
 
 const btnApplyDelete = document.getElementById('btn-apply-delete');
 const deleteFillColor = document.getElementById('delete-fill-color');
@@ -1190,6 +1197,24 @@ btnApplyHsl.onclick = () => {
   }
 };
 
+// Blur Controls
+blurStrength.oninput = () => {
+  blurStrengthVal.textContent = `${blurStrength.value}%`;
+};
+blurSize.oninput = () => {
+  blurSizeVal.textContent = `${blurSize.value}px`;
+};
+btnApplyBlur.onclick = () => {
+  if (!appState.document) return;
+  executeOp({
+    name: 'blur',
+    params: {
+      radius: parseInt(blurSize.value, 10) || 8,
+      strength: (parseInt(blurStrength.value, 10) || 0) / 100
+    }
+  });
+};
+
 // Delete Action
 btnApplyDelete.onclick = () => {
   if (!appState.document || !appState.document.selection) {
@@ -1344,6 +1369,8 @@ window.addEventListener('keydown', (e) => {
     setActiveTool('transform');
   } else if (e.key.toLowerCase() === 'u') {
     setActiveTool('hue-saturation');
+  } else if (e.key.toLowerCase() === 'b') {
+    setActiveTool('blur');
   } else if (e.key.toLowerCase() === 's') {
     setActiveTool('clone-brush');
   }
