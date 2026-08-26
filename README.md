@@ -28,6 +28,23 @@ npm run preview    # serves dist/ locally at http://localhost:4173
 
 This is the closest approximation to what GitHub Pages serves.
 
+## Tools & Shortcuts
+
+| Key | Tool |
+|---|---|
+| V / R | Transform |
+| M | Rectangular select |
+| L | Lasso select |
+| C | Crop |
+| U | Hue & Saturation |
+| B | Blur |
+| G | Fill (paint bucket) |
+| T | Text |
+| I | Dropper (Alt+Click samples from any tool) |
+| S | Clone stamp |
+| H / Space | Pan |
+| Del | Delete selection contents |
+
 ## Deployment
 
 Pushes to `main` trigger the GitHub Actions workflow (`.github/workflows/deploy.yml`), which builds the site and publishes `dist/` to GitHub Pages. Requires the repo's **Settings → Pages → Source** to be set to **GitHub Actions**.

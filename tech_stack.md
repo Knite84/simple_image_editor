@@ -23,8 +23,11 @@
 
 ### Data model (`src/document.js`)
 - `Document`: `{ id, name, width, height, layers[], activeLayerId, selection }`
-- `Layer`: `{ id, name, canvas (HTMLCanvasElement), visible, opacity, x, y }`
+- `Layer`: `{ id, name, canvas (HTMLCanvasElement), visible, opacity, x, y, meta? }`
+  - `meta` carries type-specific data; currently text layers: `{ kind:'text', text, fontFace, fontSize, color, anchorX, anchorY }`
+- `cloneLayer()` **must deep-copy `meta`** — undo snapshots would silently drop text editability otherwise
 - `cloneDocument()` is a deep clone incl. all layer canvases — used for history snapshots AND op purity.
+- `renderTextCanvas(meta)` → fitted canvas + anchor offsets, shared by text ops and live editing.
 
 ### Op registry pattern (`src/ops.js` + `src/tools/*.js`) — the core convention
 - Every document mutation is a **registered op**: `registerOp(name, handler)` where handler is pure: `(docClone, params) => doc`.
@@ -34,14 +37,17 @@
 - Interactive previews (transform drags, HSL sliders) mutate nothing persistent: they render via `renderComposite(doc, layerOverrides, excludeLayerId)` or proxy canvases, then commit a real op on release/apply.
 
 ### Supporting modules
-- `src/history.js` — full-snapshot undo manager (depth 20) built on `cloneDocument`
+- `src/history.js` — full-snapshot undo manager (depth **30**) with per-snapshot action labels + `getEntries()` view model for the History panel
+- `src/history-panel.js` — sidebar History tab: labeled steps, click-to-jump (steps undo/redo internally)
 - `src/recorder.js` — records op list, export/import JSON
 - `src/batch-queue.js` — replays recorded ops onto fresh images; zips results with jszip
 - `src/coords.js` — `Viewport` class: zoom/pan, screen↔doc coordinate conversion
 - `src/selection.js` — selection mask rasterization & combined outline paths
 - `src/transform.js` — pure geometry helpers for resize handles (unit-testable, no DOM)
 - `src/layers-panel.js` — layers sidebar UI
-- `src/main.js` — app-state singleton, DOM refs, ALL event wiring, render loop (~1500 lines)
+- `src/tools/fill.js` — contiguous flood fill (`floodFillScanline` is pure/headless-testable), opacity-blended, selection-mask aware
+- `src/tools/text.js` — `add-text-layer` / `update-text-layer` / `rasterize-layer`; editing sessions live-preview without history spam
+- `src/main.js` — app-state singleton, DOM refs, ALL event wiring, render loop (~1800 lines)
 
 ## Deployment
 

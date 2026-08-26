@@ -292,6 +292,21 @@ body {
   pointer-events: none;
 }
 
+/* History panel */
+.history-item {
+  cursor: pointer;
+}
+
+.history-item.current {
+  background: var(--accent-color);
+  color: #ffffff;
+}
+
+.history-item.future {
+  opacity: 0.45;
+  font-style: italic;
+}
+
 .viewport-footer {
   height: 28px;
   background-color: var(--bg-panel);

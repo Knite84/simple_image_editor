@@ -4,6 +4,112 @@
 import { rgbToHsl, hslToRgb } from './src/tools/hue-saturation.js';
 import { calculateAspectRatioBounds } from './src/tools/select-rect.js';
 import { computeHandleResize, hitTestHandles } from './src/transform.js';
+import { floodFillScanline } from './src/tools/fill.js';
+import { HistoryManager } from './src/history.js';
+
+// Minimal DOM stub so HistoryManager's cloneDocument path can run headlessly.
+// Must exist before any pushState/undo/redo call executes.
+globalThis.document = {
+  createElement: () => ({
+    width: 0,
+    height: 0,
+    getContext: () => ({
+      drawImage() {},
+      fillText() {},
+      getImageData: () => ({ data: new Uint8ClampedArray(4) }),
+      measureText: () => ({ width: 10, actualBoundingBoxAscent: 8, actualBoundingBoxDescent: 2 })
+    })
+  })
+};
+
+function makePixelBuffer(w, h, fill) {
+  const data = new Uint8ClampedArray(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    data[i * 4] = fill[0];
+    data[i * 4 + 1] = fill[1];
+    data[i * 4 + 2] = fill[2];
+    data[i * 4 + 3] = fill[3];
+  }
+  return data;
+}
+
+const RED = { r: 255, g: 0, b: 0 };
+
+console.log('Testing flood fill (contiguity, tolerance, alpha)...');
+{
+  // Fills the whole uniform canvas
+  const data = makePixelBuffer(4, 4, [100, 100, 100, 255]);
+  floodFillScanline(data, 4, 4, 0, 0, RED, 0);
+  if (data[0] !== 255 || data[(15 * 4) + 2] !== 0 || data[(15 * 4) + 3] !== 255) {
+    throw new Error('Flood fill should cover a uniform canvas');
+  }
+
+  // Contiguity: two same-color squares separated by a barrier — only the
+  // square containing the seed is filled
+  const w = 5, h = 3;
+  const grid = new Uint8ClampedArray(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    const x = i % w;
+    const v = x === 2 ? 0 : 200; // column of black barrier at x=2
+    grid[i * 4] = v; grid[i * 4 + 1] = v; grid[i * 4 + 2] = v; grid[i * 4 + 3] = 255;
+  }
+  floodFillScanline(grid, w, h, 0, 0, RED, 0);
+  const leftFilled = grid[4] === 255 && grid[4 + 1] === 0;
+  const rightUntouched = grid[(3 * 4)] === 200;
+  if (!leftFilled || !rightUntouched) {
+    throw new Error('Flood fill must not jump contiguous barriers');
+  }
+
+  // Tolerance: neighbor within tolerance joins, distant color does not
+  const tol = new Uint8ClampedArray([250, 250, 250, 255, 240, 240, 240, 255, 10, 10, 10, 255]);
+  floodFillScanline(tol, 3, 1, 0, 0, RED, 0.05); // ~5% of 510 ≈ dist 25
+  if (tol[4] !== 255 || tol[(2 * 4)] === 255) {
+    throw new Error('Tolerance threshold misbehaved');
+  }
+}
+console.log('✅ Flood fill tests passed');
+
+console.log('Testing History labels & entries...');
+{
+  const fakeDoc = () => ({
+    id: 'd', name: 'n', width: 4, height: 4,
+    layers: [{ id: 'l1', name: 'L', canvas: { width: 2, height: 2 }, visible: true, opacity: 1, x: 0, y: 0, meta: null }],
+    activeLayerId: 'l1',
+    selection: null
+  });
+
+  const hm = new HistoryManager(30);
+  hm.pushState(fakeDoc(), 'op-a');
+  hm.pushState(fakeDoc(), 'op-b');
+
+  let entries = hm.getEntries();
+  if (!(entries[0].kind === 'current' && entries[1].label === 'op-b' && entries[2].label === 'op-a')) {
+    throw new Error('History entries order wrong: ' + JSON.stringify(entries));
+  }
+
+  const undoneDoc = hm.undo(fakeDoc());
+  if (hm.redoLabels[0] !== 'op-b') throw new Error('Undo should carry its label to redo');
+
+  entries = hm.getEntries();
+  if (!(entries[0].kind === 'future' && entries[0].label === 'op-b' && entries[1].kind === 'current')) {
+    throw new Error('History should list future steps after undo: ' + JSON.stringify(entries));
+  }
+
+  hm.redo(undoneDoc);
+  if (hm.undoLabels.length !== 2 || hm.undoLabels[1] !== 'op-b') {
+    throw new Error('Redo did not restore label ordering');
+  }
+
+  // Depth cap keeps stacks trimmed
+  const small = new HistoryManager(2);
+  small.pushState(fakeDoc(), 'one');
+  small.pushState(fakeDoc(), 'two');
+  small.pushState(fakeDoc(), 'three');
+  if (small.undoStack.length !== 2 || small.undoLabels.length !== 2 || small.undoLabels[0] !== 'two') {
+    throw new Error('History depth cap failed');
+  }
+}
+console.log('✅ History tests passed');
 
 console.log('Testing HSL conversion...');
 const [h, s, l] = rgbToHsl(255, 0, 0); // Pure red

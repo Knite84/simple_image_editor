@@ -198,7 +198,7 @@ export function setupLayersPanel(appState, onLayerChange, onImageImported = null
       const img = new Image();
       img.onload = () => {
         const doc = appState.document;
-        appState.history.pushState(doc);
+        appState.history.pushState(doc, 'import-image-layer');
 
         const imgW = img.naturalWidth || img.width;
         const imgH = img.naturalHeight || img.height;
@@ -231,7 +231,7 @@ export function setupLayersPanel(appState, onLayerChange, onImageImported = null
   btnAdd.onclick = () => {
     if (!appState.document) return;
     const doc = appState.document;
-    appState.history.pushState(doc);
+    appState.history.pushState(doc, 'add-layer');
     const newL = createLayer(null, `Layer ${doc.layers.length + 1}`, doc.width, doc.height);
     doc.layers.push(newL);
     doc.activeLayerId = newL.id;
@@ -266,7 +266,7 @@ export function setupLayersPanel(appState, onLayerChange, onImageImported = null
     const selected = doc.layers.filter(l => ids.includes(l.id));
     if (selected.length < 2) return;
 
-    appState.history.pushState(doc);
+    appState.history.pushState(doc, 'merge-layers');
 
     // Composite selected layers onto a document-sized canvas; the bottom-most
     // selected layer becomes the merged layer (keeps its id and z-position)
@@ -304,7 +304,7 @@ export function setupLayersPanel(appState, onLayerChange, onImageImported = null
     }
     const active = getActiveLayer(doc);
     if (!active) return;
-    appState.history.pushState(doc);
+    appState.history.pushState(doc, 'delete-layer');
 
     const idx = doc.layers.indexOf(active);
     doc.layers.splice(idx, 1);

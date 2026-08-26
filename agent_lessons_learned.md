@@ -26,8 +26,11 @@ net::ERR_FAILED
 
 - Any change to document state MUST be a registered op (`registerOp` in `src/tools/*.js`) dispatched through `executeOp()` in `main.js`. Bypassing it silently loses undo/redo history and action-recorder/batch-replay support.
 - Op params must be JSON-serializable plain data (`layerId` strings, numbers, point arrays). No canvas or DOM references — ops get exported/imported as JSON and replayed onto other documents by the batch queue.
-- Interactive previews must not mutate persistent state: use `renderComposite(doc, overrides, excludeId)` / proxy canvases during the interaction, then commit one op at the end (see transform drag + HSL slider flows).
-- Keyboard shortcuts already claimed in `main.js`: V, R, M, L, C, U, S, H, Space, `[`, `]`, Delete/Backspace, Ctrl+Z/Y/D. Check for collisions before binding new ones.
+- Interactive previews must not mutate persistent state: use `renderComposite(doc, overrides, excludeId)` / proxy canvases during the interaction, then commit one op at the end (see transform drag + HSL slider + text editing flows).
+- Pixel effects must translate doc coords into **layer space** (`layer.x/y` offset, layer-sized strides). The `delete` op once indexed layer pixels with doc-width strides — it only worked by accident on full-size background layers. Fixed; don't regress it (see the `lx/ly` guard in delete.js and fill.js).
+- Keyboard shortcuts already claimed in `main.js`: V, R, M, L, C, U, B, G, T, I, S, H, Space, `[`, `]`, Delete/Backspace, Ctrl+Z/Y/D. Check for collisions before binding new ones.
+- Alt+Click is reserved: selection tools use it for subtract mode, clone brush for source points, everything else samples color (Dropper).
+- Text layers carry `meta`; if you add new layer types with metadata, extend `cloneLayer()` deep-copy or undo snapshots lose editability.
 
 ## 4. Verification commands (there is no lint/typecheck)
 

@@ -6,12 +6,12 @@
  * Layer: { id, name, canvas: HTMLCanvasElement, visible: boolean, opacity: number, x: number, y: number }
  */
 
-export function createLayer(id, name, width, height, initialCanvasOrImage = null, x = 0, y = 0, opacity = 1, visible = true) {
+export function createLayer(id, name, width, height, initialCanvasOrImage = null, x = 0, y = 0, opacity = 1, visible = true, meta = null) {
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(width));
   canvas.height = Math.max(1, Math.round(height));
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  
+
   if (initialCanvasOrImage) {
     ctx.drawImage(initialCanvasOrImage, 0, 0, canvas.width, canvas.height);
   }
@@ -23,7 +23,10 @@ export function createLayer(id, name, width, height, initialCanvasOrImage = null
     visible: visible !== false,
     opacity: typeof opacity === 'number' ? Math.max(0, Math.min(1, opacity)) : 1,
     x: x || 0,
-    y: y || 0
+    y: y || 0,
+    // Optional type-specific metadata (e.g. editable text layers).
+    // MUST be deep-copied by cloneLayer or undo snapshots lose it.
+    meta: meta ? { ...meta } : null
   };
 }
 
@@ -41,7 +44,8 @@ export function cloneLayer(layer) {
     visible: layer.visible,
     opacity: layer.opacity,
     x: layer.x,
-    y: layer.y
+    y: layer.y,
+    meta: layer.meta ? JSON.parse(JSON.stringify(layer.meta)) : null
   };
 }
 
@@ -108,6 +112,37 @@ export function cloneDocument(doc) {
 
 export function getActiveLayer(doc) {
   return doc.layers.find(l => l.id === doc.activeLayerId) || doc.layers[0] || null;
+}
+
+/**
+ * Renders text metadata onto a tightly-fitted transparent canvas.
+ * Returns the canvas plus offsets mapping the text anchor (baseline-left at
+ * meta.anchorX/anchorY in document space) to the returned canvas origin,
+ * so callers can position layer.x/y so the anchor stays put across edits.
+ */
+export function renderTextCanvas(meta) {
+  const fontSize = Math.max(8, Math.min(400, parseInt(meta.fontSize, 10) || 48));
+  const fontSpec = `${fontSize}px ${meta.fontFace || 'Arial'}, sans-serif`;
+  const text = typeof meta.text === 'string' && meta.text.length ? meta.text : ' ';
+
+  const probe = document.createElement('canvas').getContext('2d');
+  probe.font = fontSpec;
+  const m = probe.measureText(text);
+
+  const pad = Math.ceil(fontSize * 0.4) + 2;
+  const ascent = Math.max(1, Math.ceil(m.actualBoundingBoxAscent || fontSize * 0.8));
+  const descent = Math.max(1, Math.ceil(m.actualBoundingBoxDescent || fontSize * 0.25));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.ceil(m.width) + pad * 2);
+  canvas.height = ascent + descent + pad * 2;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.font = fontSpec;
+  ctx.fillStyle = meta.color || '#000000';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText(text, pad, pad + ascent);
+
+  return { canvas, offsetX: -pad, offsetY: -(pad + ascent) };
 }
 
 /**

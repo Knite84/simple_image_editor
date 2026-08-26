@@ -29,8 +29,10 @@ registerOp('delete', (doc, params) => {
   const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
   const maskData = maskCtx.getImageData(0, 0, doc.width, doc.height).data;
 
+  const lw = activeLayer.canvas.width;
+  const lh = activeLayer.canvas.height;
   const layerCtx = activeLayer.canvas.getContext('2d', { willReadFrequently: true });
-  const layerImgData = layerCtx.getImageData(0, 0, activeLayer.canvas.width, activeLayer.canvas.height);
+  const layerImgData = layerCtx.getImageData(0, 0, lw, lh);
   const layerData = layerImgData.data;
 
   const bounds = getFeatheredBounds(doc.selection);
@@ -41,9 +43,15 @@ registerOp('delete', (doc, params) => {
 
   for (let y = startY; y < endY; y++) {
     for (let x = startX; x < endX; x++) {
-      const idx = (y * doc.width + x) * 4;
-      const maskAlpha = maskData[idx + 3] / 255;
+      const midx = (y * doc.width + x) * 4;
+      const maskAlpha = maskData[midx + 3] / 255;
       if (maskAlpha <= 0) continue;
+
+      // Translate doc coords into this layer's pixel space
+      const lx = x - activeLayer.x;
+      const ly = y - activeLayer.y;
+      if (lx < 0 || ly < 0 || lx >= lw || ly >= lh) continue;
+      const idx = (ly * lw + lx) * 4;
 
       if (mode === 'transparent') {
         layerData[idx + 3] = Math.round(layerData[idx + 3] * (1 - maskAlpha));

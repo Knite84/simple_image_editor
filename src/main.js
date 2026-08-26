@@ -2,12 +2,13 @@
  * Photo Editor - Main Application Controller
  */
 
-import { createDocument, createDocumentFromImage, createLayer, renderComposite, cloneDocument, getActiveLayer } from './document.js';
+import { createDocument, createDocumentFromImage, createLayer, renderComposite, cloneDocument, getActiveLayer, renderTextCanvas } from './document.js';
 import { Viewport } from './coords.js';
 import { HistoryManager } from './history.js';
 import { applyOp } from './ops.js';
 import { ActionRecorder } from './recorder.js';
 import { setupLayersPanel } from './layers-panel.js';
+import { setupHistoryPanel } from './history-panel.js';
 import { showExportModal } from './tools/export.js';
 import { showBatchQueueModal } from './batch-queue.js';
 import { calculateAspectRatioBounds } from './tools/select-rect.js';
@@ -25,6 +26,8 @@ import './tools/resize.js';
 import './tools/rotate.js';
 import './tools/hue-saturation.js';
 import './tools/blur.js';
+import './tools/fill.js';
+import './tools/text.js';
 import './tools/delete.js';
 import './tools/clone-brush.js';
 import './tools/move.js';
@@ -61,6 +64,12 @@ export const appState = {
 
   // Canvas-edge snap guides while dragging a layer (Transform tool)
   snapGuides: null,      // { vertical: number[], horizontal: number[] }
+
+  // Shared color state: set by the Dropper, consumed by Fill / Text
+  primaryColor: '#000000',
+
+  // Text tool live-edit session
+  textEditSession: null, // { layerId, originalMeta } while editing a text layer
 
   // Clone Brush state
   cloneSource: null, // { x, y }
@@ -130,6 +139,23 @@ const blurSize = document.getElementById('blur-size');
 const blurSizeVal = document.getElementById('blur-size-val');
 const btnApplyBlur = document.getElementById('btn-apply-blur');
 
+const dropperSwatch = document.getElementById('dropper-swatch');
+const dropperHex = document.getElementById('dropper-hex');
+const btnCopyHex = document.getElementById('btn-copy-hex');
+
+const fillColorInput = document.getElementById('fill-color');
+const fillOpacity = document.getElementById('fill-opacity');
+const fillOpacityVal = document.getElementById('fill-opacity-val');
+const fillTolerance = document.getElementById('fill-tolerance');
+const fillToleranceVal = document.getElementById('fill-tolerance-val');
+
+const textContentInput = document.getElementById('text-content');
+const textFontFace = document.getElementById('text-font-face');
+const textFontSize = document.getElementById('text-font-size');
+const textColorInput = document.getElementById('text-color');
+const btnApplyText = document.getElementById('btn-apply-text');
+const btnRasterizeText = document.getElementById('btn-rasterize-text');
+
 const btnApplyDelete = document.getElementById('btn-apply-delete');
 const deleteFillColor = document.getElementById('delete-fill-color');
 
@@ -151,11 +177,17 @@ appState.viewport = new Viewport(canvasViewport, displayCanvas);
 
 // Initialize Layers Panel
 appState.layersUI = setupLayersPanel(appState, () => {
+  handleActiveLayerChangeForText();
   renderApp();
 }, () => {
   // A photo was just added as a layer: make Transform active so it can be
   // immediately moved/resized into place
   activateTransformForNewLayer();
+});
+
+// Initialize History Panel (rendered from history.onChange notifications)
+appState.historyUI = setupHistoryPanel(appState, () => {
+  renderApp();
 });
 
 /**
@@ -188,7 +220,7 @@ export function executeOp(op, record = true) {
   if (!appState.document || !op) return;
 
   // 1. Push state to Undo History before mutating
-  appState.history.pushState(appState.document);
+  appState.history.pushState(appState.document, op.name);
 
   // 2. Dispatch pure op
   appState.document = applyOp(appState.document, op);
@@ -582,6 +614,17 @@ function setActiveTool(toolName) {
     resetHslPreview();
   }
 
+  // Commit pending text edits when leaving the Text tool
+  if (previousTool === 'text' && toolName !== 'text') {
+    commitTextEdit();
+    btnRasterizeText.disabled = true;
+  }
+
+  if (toolName === 'text') {
+    const t = getActiveTextLayer();
+    if (t) loadTextSession(t);
+  }
+
   appState.snapGuides = null;
 
   toolButtons.forEach(btn => {
@@ -620,6 +663,140 @@ toolButtons.forEach(btn => {
 function activateTransformForNewLayer() {
   resizeScope.value = 'layer';
   setActiveTool('transform');
+}
+
+// ---- Text Tool: live editing session ----
+// While a text layer is being edited, changes preview directly on the layer
+// (no history spam); commitTextEdit() snapshots once via update-text-layer.
+
+function getActiveTextLayer() {
+  const doc = appState.document;
+  if (!doc) return null;
+  const layer = getActiveLayer(doc);
+  return layer && layer.meta && layer.meta.kind === 'text' ? layer : null;
+}
+
+function readTextBarValues() {
+  return {
+    text: textContentInput.value,
+    fontFace: textFontFace.value,
+    fontSize: parseInt(textFontSize.value, 10) || 48,
+    color: textColorInput.value
+  };
+}
+
+function syncTextBarFromLayer(layer) {
+  textContentInput.value = layer.meta.text;
+  textFontFace.value = layer.meta.fontFace;
+  if (![...textFontFace.options].some(o => o.value === layer.meta.fontFace)) {
+    textFontFace.value = 'Arial';
+  } else {
+    textFontFace.value = layer.meta.fontFace;
+  }
+  textFontSize.value = layer.meta.fontSize;
+  textColorInput.value = layer.meta.color;
+}
+
+/** Renders layer.meta onto the layer canvas, keeping meta.anchorX/Y fixed. */
+function applyTextMetaToLayer(layer) {
+  const { canvas, offsetX, offsetY } = renderTextCanvas(layer.meta);
+  layer.canvas.width = canvas.width;
+  layer.canvas.height = canvas.height;
+  layer.canvas.getContext('2d', { willReadFrequently: true }).drawImage(canvas, 0, 0);
+  layer.x = Math.round(layer.meta.anchorX + offsetX);
+  layer.y = Math.round(layer.meta.anchorY + offsetY);
+}
+
+function loadTextSession(layer) {
+  appState.textEditSession = {
+    layerId: layer.id,
+    originalMeta: JSON.parse(JSON.stringify(layer.meta))
+  };
+  syncTextBarFromLayer(layer);
+  btnRasterizeText.disabled = false;
+}
+
+/** Live-previews options-bar values onto the session's text layer. */
+function previewTextEdit() {
+  const doc = appState.document;
+  const s = appState.textEditSession;
+  if (!doc || !s) return;
+  const layer = doc.layers.find(l => l.id === s.layerId);
+  if (!layer || !layer.meta || layer.meta.kind !== 'text') return;
+
+  const v = readTextBarValues();
+  layer.meta = {
+    ...layer.meta,
+    text: v.text,
+    fontFace: v.fontFace,
+    fontSize: Math.max(8, Math.min(400, v.fontSize)),
+    color: v.color
+  };
+  applyTextMetaToLayer(layer);
+  renderApp();
+}
+
+/**
+ * Commits the in-flight session as one history entry. Restores pre-edit
+ * pixels/meta first so executeOp's snapshot captures the original state.
+ */
+function commitTextEdit() {
+  const s = appState.textEditSession;
+  if (!s) return;
+  appState.textEditSession = null;
+
+  const doc = appState.document;
+  const layer = doc && doc.layers.find(l => l.id === s.layerId);
+  if (!layer || !layer.meta || layer.meta.kind !== 'text') return;
+
+  const orig = s.originalMeta;
+  const changed = ['text', 'fontFace', 'fontSize', 'color']
+    .some(k => (orig[k] ?? '') !== (layer.meta[k] ?? ''));
+
+  if (!changed) return;
+
+  layer.meta = { ...orig };
+  applyTextMetaToLayer(layer);
+
+  const cur = readTextBarValues();
+  executeOp({
+    name: 'update-text-layer',
+    params: {
+      layerId: layer.id,
+      text: cur.text,
+      fontFace: cur.fontFace,
+      fontSize: cur.fontSize,
+      color: cur.color
+    }
+  });
+}
+
+/** Discards the in-flight session, restoring the pre-edit state. */
+function cancelTextEdit() {
+  const s = appState.textEditSession;
+  if (!s) return;
+  appState.textEditSession = null;
+
+  const doc = appState.document;
+  const layer = doc && doc.layers.find(l => l.id === s.layerId);
+  if (!layer || !layer.meta || layer.meta.kind !== 'text') return;
+
+  layer.meta = { ...s.originalMeta };
+  applyTextMetaToLayer(layer);
+  syncTextBarFromLayer(layer);
+  renderApp();
+}
+
+/** Called whenever the active layer may have changed while Text is active. */
+function handleActiveLayerChangeForText() {
+  if (appState.activeTool !== 'text') return;
+  commitTextEdit();
+  const t = getActiveTextLayer();
+  if (t) {
+    loadTextSession(t);
+  } else {
+    btnRasterizeText.disabled = true;
+  }
 }
 
 /**
@@ -717,6 +894,56 @@ canvasViewport.addEventListener('pointerdown', (e) => {
       renderOverlay();
       return;
     }
+  }
+
+  // Dropper: dedicated tool, or Alt+Click from tools that don't reserve Alt
+  // (selection tools use Alt for subtract; clone brush uses it for source)
+  const altIsReserved = appState.activeTool === 'clone-brush' ||
+    appState.activeTool === 'select-rect' ||
+    appState.activeTool === 'select-lasso';
+  if (appState.activeTool === 'dropper' || (e.altKey && !altIsReserved)) {
+    sampleColorAt(docPos);
+    return;
+  }
+
+  // Fill: bucket click on the active layer
+  if (appState.activeTool === 'fill') {
+    const layer = getActiveLayer(appState.document);
+    if (!layer) return;
+    const lx = docPos.x - layer.x;
+    const ly = docPos.y - layer.y;
+    if (lx < 0 || ly < 0 || lx >= layer.canvas.width || ly >= layer.canvas.height) return;
+    executeOp({
+      name: 'fill',
+      params: {
+        x: docPos.x,
+        y: docPos.y,
+        color: fillColorInput.value,
+        opacity: parseInt(fillOpacity.value, 10) / 100,
+        tolerance: parseInt(fillTolerance.value, 10) / 100
+      }
+    });
+    return;
+  }
+
+  // Text: click places a new editable text layer anchored at the click point
+  if (appState.activeTool === 'text') {
+    commitTextEdit(); // flush any prior session
+    executeOp({
+      name: 'add-text-layer',
+      params: {
+        x: docPos.x,
+        y: docPos.y,
+        ...readTextBarValues()
+      }
+    });
+    const created = getActiveLayer(appState.document);
+    if (created && created.meta && created.meta.kind === 'text') {
+      loadTextSession(created);
+      textContentInput.focus();
+      textContentInput.select();
+    }
+    return;
   }
 
   // Transform handle drag start (Transform tool, no selection)
@@ -1246,6 +1473,92 @@ btnSetSource.onclick = () => {
   cloneSourceStatus.textContent = 'Click on image to set sample point...';
 };
 
+// Dropper / Color Sampling
+function rgbToHex(r, g, b) {
+  return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Samples the composited pixel under docPos from the display canvas,
+ * stores it as appState.primaryColor and updates the dropper UI.
+ */
+function sampleColorAt(docPos) {
+  if (!appState.document) return;
+  const x = Math.floor(docPos.rawX);
+  const y = Math.floor(docPos.rawY);
+  const doc = appState.document;
+  if (x < 0 || y < 0 || x >= doc.width || y >= doc.height) return;
+
+  const px = displayCanvas.getContext('2d').getImageData(x, y, 1, 1).data;
+  const hex = rgbToHex(px[0], px[1], px[2]);
+  appState.primaryColor = hex;
+
+  dropperSwatch.style.background = hex;
+  dropperHex.textContent = hex.toUpperCase();
+  fillColorInput.value = hex;
+}
+
+btnCopyHex.onclick = () => {
+  if (dropperHex.textContent && dropperHex.textContent !== '—') {
+    navigator.clipboard.writeText(dropperHex.textContent);
+  }
+};
+
+// Fill Controls
+fillColorInput.value = appState.primaryColor;
+fillColorInput.oninput = () => {
+  appState.primaryColor = fillColorInput.value;
+};
+fillOpacity.oninput = () => {
+  fillOpacityVal.textContent = `${fillOpacity.value}%`;
+};
+fillTolerance.oninput = () => {
+  fillToleranceVal.textContent = `${fillTolerance.value}`;
+};
+
+// Text Controls
+[textContentInput, textFontFace, textFontSize, textColorInput].forEach(el => {
+  el.addEventListener('input', () => {
+    if (appState.textEditSession) previewTextEdit();
+  });
+});
+textContentInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    commitTextEdit();
+    textContentInput.blur();
+  }
+});
+
+btnApplyText.onclick = () => {
+  const t = getActiveTextLayer();
+  if (!t) {
+    alert('Click the canvas to create a text layer first.');
+    return;
+  }
+  const desired = readTextBarValues();
+  const hasSessionForLayer = appState.textEditSession &&
+    appState.textEditSession.layerId === t.id;
+  if (!hasSessionForLayer) loadTextSession(t);
+
+  // Force bar values back in case loading clobbered them with stored meta
+  textContentInput.value = desired.text;
+  textFontFace.value = desired.fontFace;
+  textFontSize.value = desired.fontSize;
+  textColorInput.value = desired.color;
+
+  previewTextEdit();
+  commitTextEdit();
+};
+
+btnRasterizeText.onclick = () => {
+  commitTextEdit();
+  const t = getActiveTextLayer();
+  if (!t) return;
+  executeOp({ name: 'rasterize-layer', params: { layerId: t.id } });
+  btnRasterizeText.disabled = true;
+};
+
 // Recorder UI
 btnRecord.onclick = () => {
   const isRec = appState.recorder.toggle();
@@ -1305,6 +1618,13 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && appState.transformDrag) {
     e.preventDefault();
     cancelTransformDrag();
+    return;
+  }
+
+  // Cancel in-flight text editing session
+  if (e.key === 'Escape' && appState.textEditSession && e.target.tagName !== 'INPUT') {
+    e.preventDefault();
+    cancelTextEdit();
     return;
   }
 
@@ -1371,6 +1691,12 @@ window.addEventListener('keydown', (e) => {
     setActiveTool('hue-saturation');
   } else if (e.key.toLowerCase() === 'b') {
     setActiveTool('blur');
+  } else if (e.key.toLowerCase() === 'i') {
+    setActiveTool('dropper');
+  } else if (e.key.toLowerCase() === 'g') {
+    setActiveTool('fill');
+  } else if (e.key.toLowerCase() === 't') {
+    setActiveTool('text');
   } else if (e.key.toLowerCase() === 's') {
     setActiveTool('clone-brush');
   }
@@ -1399,7 +1725,7 @@ window.addEventListener('paste', (e) => {
               loadNewImage(img, 'Pasted Image');
             } else {
               const doc = appState.document;
-              appState.history.pushState(doc);
+              appState.history.pushState(doc, 'paste-layer');
 
               const imgW = img.naturalWidth || img.width;
               const imgH = img.naturalHeight || img.height;
@@ -1461,7 +1787,7 @@ async function addDroppedImagesAsLayers(files) {
   }
   if (!doc || results.length === 0) return;
 
-  appState.history.pushState(doc);
+  appState.history.pushState(doc, 'drop-images');
 
   for (const { img, name } of results) {
     const imgW = img.naturalWidth || img.width;
@@ -1647,9 +1973,10 @@ btnRedo.addEventListener('click', () => {
   }
 });
 
-appState.history.onChange(({ canUndo, canRedo }) => {
-  btnUndo.disabled = !canUndo;
-  btnRedo.disabled = !canRedo;
+appState.history.onChange((state) => {
+  btnUndo.disabled = !state.canUndo;
+  btnRedo.disabled = !state.canRedo;
+  if (appState.historyUI) appState.historyUI.render(state);
 });
 
 // Sidebar tabs
