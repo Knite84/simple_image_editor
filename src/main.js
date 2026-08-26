@@ -156,6 +156,16 @@ const textColorInput = document.getElementById('text-color');
 const btnApplyText = document.getElementById('btn-apply-text');
 const btnRasterizeText = document.getElementById('btn-rasterize-text');
 
+// On-Canvas Inline Text Editor element
+const inlineTextEditor = document.createElement('input');
+inlineTextEditor.type = 'text';
+inlineTextEditor.id = 'inline-text-editor';
+inlineTextEditor.className = 'inline-text-editor';
+inlineTextEditor.placeholder = 'Type text…';
+inlineTextEditor.autocomplete = 'off';
+inlineTextEditor.spellcheck = false;
+canvasViewport.appendChild(inlineTextEditor);
+
 const btnApplyDelete = document.getElementById('btn-apply-delete');
 const deleteFillColor = document.getElementById('delete-fill-color');
 
@@ -257,7 +267,14 @@ export function renderApp() {
     if (appState.transformDrag) {
       overrides = new Map([[appState.transformDrag.layerId, appState.transformDrag.previewRect]]);
     }
-    const composite = renderComposite(doc, overrides);
+    // When actively typing in inline text editor, omit this text layer from canvas bitmap
+    // so the DOM editor is the single clean rendering source with no duplicate ghost text
+    let excludeLayerId = null;
+    if (appState.activeTool === 'text' && inlineTextEditor.style.display !== 'none') {
+      const t = getActiveTextLayer();
+      if (t) excludeLayerId = t.id;
+    }
+    const composite = renderComposite(doc, overrides, excludeLayerId);
     ctx.drawImage(composite, 0, 0);
   }
 
@@ -277,6 +294,7 @@ export function renderApp() {
 
   appState.layersUI.render();
   renderOverlay();
+  syncInlineTextEditorPosition();
 }
 
 /**
@@ -442,6 +460,62 @@ function renderOverlay() {
       ctx.save();
       ctx.globalAlpha = isSelectionDrag ? 0.3 : 0.14;
       ctx.drawImage(tinted, 0, 0);
+      ctx.restore();
+    }
+  }
+
+  // 1.45 Render active text layer bounding box when Text tool is active
+  if (appState.activeTool === 'text') {
+    const textLayer = getActiveTextLayer();
+    if (textLayer) {
+      const bx = textLayer.x;
+      const by = textLayer.y;
+      const bw = Math.max(textLayer.canvas.width, 60);
+      const bh = Math.max(textLayer.canvas.height, Math.round(textLayer.meta.fontSize || 32));
+
+      ctx.save();
+      // Subtle background tint for working space
+      ctx.fillStyle = 'rgba(59, 130, 246, 0.08)';
+      ctx.fillRect(bx, by, bw, bh);
+
+      // Frame dashed border
+      ctx.strokeStyle = '#3b82f6';
+      ctx.lineWidth = 1.5 / viewScale;
+      ctx.setLineDash([5 / viewScale, 4 / viewScale]);
+      ctx.strokeRect(bx, by, bw, bh);
+
+      // Corner handles
+      ctx.setLineDash([]);
+      const handleSize = 6 / viewScale;
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#3b82f6';
+      const corners = [
+        { x: bx, y: by },
+        { x: bx + bw, y: by },
+        { x: bx, y: by + bh },
+        { x: bx + bw, y: by + bh }
+      ];
+      for (const c of corners) {
+        ctx.fillRect(c.x - handleSize / 2, c.y - handleSize / 2, handleSize, handleSize);
+        ctx.strokeRect(c.x - handleSize / 2, c.y - handleSize / 2, handleSize, handleSize);
+      }
+
+      // Metadata badge above the frame
+      const badgeFontSize = Math.max(9, Math.round(11 / viewScale));
+      ctx.font = `600 ${badgeFontSize}px -apple-system, sans-serif`;
+      const label = `Text · ${textLayer.meta.fontFace || 'Arial'} ${textLayer.meta.fontSize}px`;
+      const m = ctx.measureText(label);
+      const padH = 6 / viewScale;
+      const badgeW = m.width + padH * 2;
+      const badgeH = 16 / viewScale;
+      const badgeY = by - badgeH - 3 / viewScale;
+
+      ctx.fillStyle = '#3b82f6';
+      ctx.fillRect(bx, badgeY, badgeW, badgeH);
+      ctx.fillStyle = '#ffffff';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, bx + padH, badgeY + badgeH / 2);
+
       ctx.restore();
     }
   }
@@ -617,12 +691,16 @@ function setActiveTool(toolName) {
   // Commit pending text edits when leaving the Text tool
   if (previousTool === 'text' && toolName !== 'text') {
     commitTextEdit();
+    hideInlineTextEditor();
     btnRasterizeText.disabled = true;
   }
 
   if (toolName === 'text') {
     const t = getActiveTextLayer();
-    if (t) loadTextSession(t);
+    if (t) {
+      loadTextSession(t);
+      showInlineTextEditor(t);
+    }
   }
 
   appState.snapGuides = null;
@@ -685,8 +763,74 @@ function readTextBarValues() {
   };
 }
 
+function showInlineTextEditor(layer) {
+  if (!layer || !layer.meta || layer.meta.kind !== 'text' || appState.activeTool !== 'text') {
+    hideInlineTextEditor();
+    return;
+  }
+  inlineTextEditor.value = layer.meta.text || '';
+  inlineTextEditor.style.display = 'block';
+  syncInlineTextEditorPosition();
+  setTimeout(() => {
+    inlineTextEditor.focus({ preventScroll: true });
+    inlineTextEditor.select();
+  }, 0);
+}
+
+function hideInlineTextEditor() {
+  inlineTextEditor.style.display = 'none';
+}
+
+function syncInlineTextEditorPosition() {
+  if (inlineTextEditor.style.display === 'none' || appState.activeTool !== 'text') return;
+  const layer = getActiveTextLayer();
+  if (!layer || !layer.meta || layer.meta.kind !== 'text') {
+    hideInlineTextEditor();
+    return;
+  }
+
+  const canvasRect = displayCanvas.getBoundingClientRect();
+  const vpRect = canvasViewport.getBoundingClientRect();
+  const doc = appState.document;
+  const viewScale = doc && doc.width > 0 ? canvasRect.width / doc.width : (appState.viewport.zoom || 1);
+
+  const screenX = (canvasRect.left - vpRect.left) + layer.x * viewScale;
+  const screenY = (canvasRect.top - vpRect.top) + layer.y * viewScale;
+  const screenW = Math.max(70, layer.canvas.width * viewScale);
+  const screenH = Math.max(26, layer.canvas.height * viewScale);
+  const scaledFontSize = Math.max(10, Math.round(layer.meta.fontSize * viewScale));
+
+  inlineTextEditor.style.left = `${Math.round(screenX)}px`;
+  inlineTextEditor.style.top = `${Math.round(screenY)}px`;
+  inlineTextEditor.style.minWidth = `${Math.round(screenW)}px`;
+  inlineTextEditor.style.height = `${Math.round(screenH)}px`;
+  inlineTextEditor.style.fontSize = `${scaledFontSize}px`;
+  inlineTextEditor.style.fontFamily = `"${layer.meta.fontFace || 'Arial'}", sans-serif`;
+  inlineTextEditor.style.color = layer.meta.color || '#000000';
+}
+
+// Inline Text Editor Event Listeners
+inlineTextEditor.addEventListener('input', () => {
+  textContentInput.value = inlineTextEditor.value;
+  previewTextEdit();
+  syncInlineTextEditorPosition();
+});
+
+inlineTextEditor.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    commitTextEdit();
+    inlineTextEditor.blur();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    cancelTextEdit();
+    hideInlineTextEditor();
+  }
+});
+
 function syncTextBarFromLayer(layer) {
   textContentInput.value = layer.meta.text;
+  inlineTextEditor.value = layer.meta.text;
   textFontFace.value = layer.meta.fontFace;
   if (![...textFontFace.options].some(o => o.value === layer.meta.fontFace)) {
     textFontFace.value = 'Arial';
@@ -695,6 +839,7 @@ function syncTextBarFromLayer(layer) {
   }
   textFontSize.value = layer.meta.fontSize;
   textColorInput.value = layer.meta.color;
+  syncInlineTextEditorPosition();
 }
 
 /** Renders layer.meta onto the layer canvas, keeping meta.anchorX/Y fixed. */
@@ -719,8 +864,22 @@ function loadTextSession(layer) {
 /** Live-previews options-bar values onto the session's text layer. */
 function previewTextEdit() {
   const doc = appState.document;
+  if (!doc) return;
+
+  // Self-heal: open session if none active but we have an active text layer
+  if (!appState.textEditSession && appState.activeTool === 'text') {
+    const t = getActiveTextLayer();
+    if (t) {
+      appState.textEditSession = {
+        layerId: t.id,
+        originalMeta: JSON.parse(JSON.stringify(t.meta))
+      };
+      btnRasterizeText.disabled = false;
+    }
+  }
+
   const s = appState.textEditSession;
-  if (!doc || !s) return;
+  if (!s) return;
   const layer = doc.layers.find(l => l.id === s.layerId);
   if (!layer || !layer.meta || layer.meta.kind !== 'text') return;
 
@@ -734,6 +893,7 @@ function previewTextEdit() {
   };
   applyTextMetaToLayer(layer);
   renderApp();
+  syncInlineTextEditorPosition();
 }
 
 /**
@@ -769,6 +929,14 @@ function commitTextEdit() {
       color: cur.color
     }
   });
+
+  // Re-arm: if we're still on the text tool, start a fresh session on the committed layer
+  if (appState.activeTool === 'text') {
+    const updated = getActiveTextLayer();
+    if (updated && updated.id === layer.id) {
+      loadTextSession(updated);
+    }
+  }
 }
 
 /** Discards the in-flight session, restoring the pre-edit state. */
@@ -785,6 +953,7 @@ function cancelTextEdit() {
   applyTextMetaToLayer(layer);
   syncTextBarFromLayer(layer);
   renderApp();
+  hideInlineTextEditor();
 }
 
 /** Called whenever the active layer may have changed while Text is active. */
@@ -794,7 +963,9 @@ function handleActiveLayerChangeForText() {
   const t = getActiveTextLayer();
   if (t) {
     loadTextSession(t);
+    showInlineTextEditor(t);
   } else {
+    hideInlineTextEditor();
     btnRasterizeText.disabled = true;
   }
 }
@@ -926,22 +1097,50 @@ canvasViewport.addEventListener('pointerdown', (e) => {
     return;
   }
 
-  // Text: click places a new editable text layer anchored at the click point
+  // Text: hit-test existing text layers or place a new editable text layer
   if (appState.activeTool === 'text') {
+    const doc = appState.document;
+    const tol = 6 / (appState.viewport.zoom || 1);
+    const hitTextLayer = [...doc.layers].reverse().find(l => {
+      if (!l.visible || !l.meta || l.meta.kind !== 'text') return false;
+      const w = Math.max(l.canvas.width, 50);
+      const h = Math.max(l.canvas.height, 20);
+      return (
+        docPos.x >= l.x - tol &&
+        docPos.x <= l.x + w + tol &&
+        docPos.y >= l.y - tol &&
+        docPos.y <= l.y + h + tol
+      );
+    });
+
+    if (hitTextLayer) {
+      if (!appState.textEditSession || appState.textEditSession.layerId !== hitTextLayer.id) {
+        commitTextEdit();
+        doc.activeLayerId = hitTextLayer.id;
+        loadTextSession(hitTextLayer);
+        appState.layersUI.render();
+      }
+      showInlineTextEditor(hitTextLayer);
+      renderApp();
+      return;
+    }
+
     commitTextEdit(); // flush any prior session
     executeOp({
       name: 'add-text-layer',
       params: {
         x: docPos.x,
         y: docPos.y,
-        ...readTextBarValues()
+        text: '',
+        fontFace: textFontFace.value,
+        fontSize: parseInt(textFontSize.value, 10) || 48,
+        color: textColorInput.value
       }
     });
     const created = getActiveLayer(appState.document);
     if (created && created.meta && created.meta.kind === 'text') {
       loadTextSession(created);
-      textContentInput.focus();
-      textContentInput.select();
+      showInlineTextEditor(created);
     }
     return;
   }
@@ -1518,8 +1717,10 @@ fillTolerance.oninput = () => {
 
 // Text Controls
 [textContentInput, textFontFace, textFontSize, textColorInput].forEach(el => {
-  el.addEventListener('input', () => {
-    if (appState.textEditSession) previewTextEdit();
+  ['input', 'change'].forEach(evt => {
+    el.addEventListener(evt, () => {
+      previewTextEdit();
+    });
   });
 });
 textContentInput.addEventListener('keydown', (e) => {

@@ -531,3 +531,28 @@ body {
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* On-Canvas Inline Text Editor */
+.inline-text-editor {
+  position: absolute;
+  z-index: 15;
+  display: none;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #000000;
+  padding: 0;
+  margin: 0;
+  box-sizing: border-box;
+  resize: none;
+  overflow: visible;
+  white-space: pre;
+  box-shadow: none;
+  border-radius: 0;
+  line-height: 1;
+  caret-color: #3b82f6;
+}
+
+.inline-text-editor::placeholder {
+  color: rgba(160, 160, 175, 0.6);
+}
