@@ -14,7 +14,7 @@ import { showBatchQueueModal } from './batch-queue.js';
 import { calculateAspectRatioBounds } from './tools/select-rect.js';
 import { interpolateStroke, applyStamp, getCircularBrushMask } from './tools/clone-brush.js';
 import { getLayerHslTargets, applyHslToImageData } from './tools/hue-saturation.js';
-import { getSelectionMask, computeSelectionOutline } from './selection.js';
+import { getSelectionMask, getFeatheredBounds, computeSelectionOutline } from './selection.js';
 
 import { getHandlePositions, hitTestHandles, computeHandleResize, HANDLE_IDS, CORNER_HANDLES, HANDLE_CURSORS } from './transform.js';
 
@@ -31,6 +31,7 @@ import './tools/text.js';
 import './tools/delete.js';
 import './tools/clone-brush.js';
 import './tools/move.js';
+import './tools/clipboard.js';
 
 // Application State
 export const appState = {
@@ -81,7 +82,10 @@ export const appState = {
 
   // HSL Proxy Preview state
   hslProxyCanvas: null,
-  isHslPreviewing: false
+  isHslPreviewing: false,
+
+  // Internal clipboard for selection copy/paste (in-memory only)
+  clipboard: null // { canvas, docX, docY }
 };
 
 // DOM References
@@ -721,12 +725,20 @@ function setActiveTool(toolName) {
   if (toolName === 'pan') {
     canvasViewport.style.cursor = 'grab';
   } else if (toolName === 'transform') {
-    canvasViewport.style.cursor = 'move';
+    canvasViewport.style.cursor = getTransformCursor();
   } else {
     canvasViewport.style.cursor = '';
   }
 
   renderOverlay();
+}
+
+/**
+ * Transform tool cursor: standard move arrows mean a layer drag; the plain
+ * arrow means a selection exists, so a drag moves the selection instead.
+ */
+function getTransformCursor() {
+  return appState.document && appState.document.selection ? 'default' : 'move';
 }
 
 toolButtons.forEach(btn => {
@@ -1310,7 +1322,7 @@ window.addEventListener('pointerup', (e) => {
   if (appState.isPanning) {
     appState.isPanning = false;
     appState.panStartPos = null;
-    canvasViewport.style.cursor = appState.activeTool === 'pan' ? 'grab' : (appState.activeTool === 'transform' ? 'move' : '');
+    canvasViewport.style.cursor = appState.activeTool === 'pan' ? 'grab' : (appState.activeTool === 'transform' ? getTransformCursor() : '');
     return;
   }
 
@@ -1818,6 +1830,61 @@ btnBatchModal.onclick = () => {
 };
 
 // Keyboard Shortcuts
+// ---- Selection Copy / Cut / Paste (Ctrl+C / Ctrl+X / Ctrl+V) ----
+// Copies the active layer's pixels inside the selection mask (or the whole
+// layer when nothing is selected) into an in-memory clipboard buffer.
+
+function extractSelectionToClipboard() {
+  const doc = appState.document;
+  if (!doc) return false;
+  const layer = getActiveLayer(doc);
+  if (!layer) return false;
+
+  const lw = layer.canvas.width;
+  const lh = layer.canvas.height;
+  const b = doc.selection
+    ? getFeatheredBounds(doc.selection)
+    : { x: layer.x, y: layer.y, w: lw, h: lh };
+
+  const sx = Math.max(0, Math.max(layer.x, b.x));
+  const sy = Math.max(0, Math.max(layer.y, b.y));
+  const ex = Math.min(doc.width, Math.min(layer.x + lw, b.x + b.w));
+  const ey = Math.min(doc.height, Math.min(layer.y + lh, b.y + b.h));
+  const sw = ex - sx;
+  const sh = ey - sy;
+  if (sw <= 0 || sh <= 0) return false;
+
+  const region = document.createElement('canvas');
+  region.width = sw;
+  region.height = sh;
+  const rctx = region.getContext('2d', { willReadFrequently: true });
+  rctx.drawImage(layer.canvas, sx - layer.x, sy - layer.y, sw, sh, 0, 0, sw, sh);
+
+  if (doc.selection) {
+    const mask = getSelectionMask(doc.selection, doc.width, doc.height);
+    rctx.globalCompositeOperation = 'destination-in';
+    rctx.drawImage(mask, sx, sy, sw, sh, 0, 0, sw, sh);
+    rctx.globalCompositeOperation = 'source-over';
+  }
+
+  appState.clipboard = { canvas: region, docX: sx, docY: sy };
+  return true;
+}
+
+function pasteClipboard() {
+  if (!appState.document || !appState.clipboard) return false;
+  executeOp({
+    name: 'paste-clipboard-layer',
+    params: {
+      canvas: appState.clipboard.canvas,
+      docX: appState.clipboard.docX,
+      docY: appState.clipboard.docY
+    }
+  }, false);
+  activateTransformForNewLayer();
+  return true;
+}
+
 window.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') {
     return;
@@ -1869,6 +1936,19 @@ window.addEventListener('keydown', (e) => {
   } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
     e.preventDefault();
     executeOp({ name: 'clear-selection' });
+  } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+    e.preventDefault();
+    extractSelectionToClipboard();
+  } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
+    e.preventDefault();
+    if (extractSelectionToClipboard() && appState.document.selection) {
+      executeOp({ name: 'delete', params: { mode: 'transparent' } });
+    }
+  } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+    if (appState.clipboard) {
+      e.preventDefault();
+      pasteClipboard();
+    }
   } else if (e.key === 'Delete' || e.key === 'Backspace') {
     if (appState.document && appState.document.selection) {
       e.preventDefault();
@@ -1914,7 +1994,7 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => {
   if (e.code === 'Space') {
     appState.isSpacePressed = false;
-    canvasViewport.style.cursor = appState.activeTool === 'pan' ? 'grab' : (appState.activeTool === 'transform' ? 'move' : '');
+    canvasViewport.style.cursor = appState.activeTool === 'pan' ? 'grab' : (appState.activeTool === 'transform' ? getTransformCursor() : '');
   }
 });
 
