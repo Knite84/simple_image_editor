@@ -38,6 +38,25 @@ registerOp('clear-selection', (doc) => {
 });
 
 /**
+ * Inverts the current selection: selected pixels become deselected and vice versa.
+ * Modeled as a full-document additive part followed by every existing part with
+ * its op flipped, so the mask compositing (paint then erase) yields the complement.
+ */
+registerOp('invert-selection', (doc) => {
+  const sel = doc.selection;
+  if (!sel) return doc; // Inverse of "everything selected" is "nothing selected"
+
+  const fullPart = createRectPart(0, 0, doc.width, doc.height);
+  const flippedParts = getSelectionParts(sel).map(part => ({
+    ...part,
+    op: part.op === 'subtract' ? 'add' : 'subtract'
+  }));
+
+  doc.selection = createCompositeSelection([fullPart, ...flippedParts], sel.feather);
+  return doc;
+});
+
+/**
  * Re-applies feathering to the existing selection without altering its geometry
  */
 registerOp('set-selection-feather', (doc, params) => {

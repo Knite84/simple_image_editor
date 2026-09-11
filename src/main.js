@@ -115,6 +115,8 @@ const optRectMode = document.getElementById('opt-rect-mode');
 const optLassoMode = document.getElementById('opt-lasso-mode');
 const btnRectDeselect = document.getElementById('btn-rect-deselect');
 const btnLassoDeselect = document.getElementById('btn-lasso-deselect');
+const btnRectInvert = document.getElementById('btn-rect-invert');
+const btnLassoInvert = document.getElementById('btn-lasso-invert');
 
 const btnApplyCrop = document.getElementById('btn-apply-crop');
 const resizeW = document.getElementById('resize-w');
@@ -1431,6 +1433,12 @@ window.addEventListener('pointerup', (e) => {
 // Clear Selection
 btnRectDeselect.onclick = () => executeOp({ name: 'clear-selection' });
 btnLassoDeselect.onclick = () => executeOp({ name: 'clear-selection' });
+btnRectInvert.onclick = () => {
+  if (appState.document && appState.document.selection) executeOp({ name: 'invert-selection' });
+};
+btnLassoInvert.onclick = () => {
+  if (appState.document && appState.document.selection) executeOp({ name: 'invert-selection' });
+};
 
 // Rotate Active Layer 90°
 btnRotateCw.onclick = () => {
