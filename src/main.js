@@ -2076,6 +2076,23 @@ async function addDroppedImagesAsLayers(files) {
   }
   if (!doc || results.length === 0) return;
 
+  // Grow the document canvas if any dropped image is larger than it,
+  // matching the canvas sizing behaviour of the Open Image button
+  let maxW = doc.width;
+  let maxH = doc.height;
+  for (const { img } of results) {
+    const w = img.naturalWidth || img.width;
+    const h = img.naturalHeight || img.height;
+    if (w > maxW) maxW = w;
+    if (h > maxH) maxH = h;
+  }
+  if (maxW !== doc.width || maxH !== doc.height) {
+    appState.history.pushState(doc, 'drop-images-resize');
+    doc.width = maxW;
+    doc.height = maxH;
+    appState.viewport.fitToWindow(doc);
+  }
+
   appState.history.pushState(doc, 'drop-images');
 
   for (const { img, name } of results) {

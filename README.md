@@ -44,6 +44,16 @@ This is the closest approximation to what GitHub Pages serves.
 | S | Clone stamp |
 | H / Space | Pan |
 | Del | Delete selection contents |
+| Ctrl+C | Copy active layer inside selection (whole layer if none) |
+| Ctrl+X | Cut selection (copies, then deletes contents) |
+| Ctrl+V | Paste as a new layer at original position (falls back to the browser's image paste when the internal clipboard is empty) |
+| Ctrl+D | Clear selection |
+
+Marching-ants tip: with the Transform tool active, the vertical move arrows mean a drag will move the layer; a plain arrow cursor means a selection exists, so a drag moves the selection outline instead.
+
+## Inverse Selection
+
+Both the rectangle and lasso tools have an **Inverse Selection** button next to Clear Selection. It flips the selection — selected pixels become deselected and vice versa. Inverting when nothing is selected is a no-op (nothing selected already means "everything").
 
 ## Deployment
 
