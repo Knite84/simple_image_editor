@@ -14,7 +14,7 @@ import { showBatchQueueModal } from './batch-queue.js';
 import { calculateAspectRatioBounds } from './tools/select-rect.js';
 import { interpolateStroke, applyStamp, getCircularBrushMask } from './tools/clone-brush.js';
 import { getLayerHslTargets, applyHslToImageData } from './tools/hue-saturation.js';
-import { getSelectionMask, getFeatheredBounds, computeSelectionOutline } from './selection.js';
+import { getSelectionMask, getFeatheredBounds, computeSelectionOutline, getSelectionParts, createRectSelection } from './selection.js';
 
 import { getHandlePositions, hitTestHandles, computeHandleResize, HANDLE_IDS, CORNER_HANDLES, HANDLE_CURSORS } from './transform.js';
 
@@ -62,6 +62,10 @@ export const appState = {
   // Interactive layer transform state (Transform tool handles)
   transformDrag: null,   // { layerId, handleId, startRect, previewRect }
   transformHover: null,  // hovered handle id or null
+
+  // Selection resize handles (Crop tool)
+  cropSelDrag: null,     // { handleId, startBounds, startSelection }
+  cropSelHover: null,    // hovered handle id or null
 
   // Canvas-edge snap guides while dragging a layer (Transform tool)
   snapGuides: null,      // { vertical: number[], horizontal: number[] }
@@ -555,6 +559,32 @@ function renderOverlay() {
     }
   }
 
+  // 1.55 Render crop-selection resize handles (Crop tool, single rect selection)
+  if (appState.activeTool === 'crop' && doc.selection && !appState.isPointerDown) {
+    const previewBounds = getSimpleRectSelectionBounds();
+    if (previewBounds) {
+      const zoom = appState.viewport.zoom || 1;
+      const positions = getHandlePositions(previewBounds);
+      const handleSize = 8 / zoom;
+      const lineWidth = 1 / zoom;
+
+      ctx.save();
+      ctx.strokeStyle = '#3b82f6';
+      ctx.lineWidth = lineWidth;
+      ctx.strokeRect(previewBounds.x, previewBounds.y, previewBounds.w, previewBounds.h);
+
+      for (const id of HANDLE_IDS) {
+        const p = positions[id];
+        ctx.fillStyle = appState.cropSelHover === id ? '#3b82f6' : '#ffffff';
+        ctx.beginPath();
+        ctx.rect(p.x - handleSize / 2, p.y - handleSize / 2, handleSize, handleSize);
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
   // 1.6 Canvas-edge snap guides during Transform layer drags
   if (appState.snapGuides && (appState.snapGuides.vertical.length || appState.snapGuides.horizontal.length)) {
     const ext = Math.max(doc.width, doc.height);
@@ -1005,6 +1035,51 @@ function commitTransformDrag() {
 }
 
 /**
+ * Returns the bounds when the selection consists of exactly one rect part
+ * (the shape a crop drag produces), so resize handles can be offered.
+ */
+function getSimpleRectSelectionBounds() {
+  const sel = appState.document && appState.document.selection;
+  if (!sel) return null;
+  const parts = getSelectionParts(sel);
+  if (parts.length !== 1 || parts[0].type !== 'rect') return null;
+  return { ...parts[0].bounds };
+}
+
+/**
+ * Commits an interactive crop-selection resize. The selection object was
+ * replaced live each frame, so it is restored to the pre-drag object before
+ * executing the op, letting the history snapshot capture the original state.
+ */
+function commitCropSelectionResize() {
+  const d = appState.cropSelDrag;
+  appState.cropSelDrag = null;
+  if (!d) return;
+  const bounds = getSimpleRectSelectionBounds();
+  appState.document.selection = d.startSelection;
+  const s = d.startBounds;
+  if (bounds && (bounds.w !== s.w || bounds.h !== s.h || bounds.x !== s.x || bounds.y !== s.y)) {
+    executeOp({
+      name: 'select-rect',
+      params: { bounds, feather: appState.document.selection.feather, mode: 'new' }
+    });
+  } else {
+    renderApp();
+  }
+}
+
+/** Cancels a crop-selection resize (Esc), restoring the original selection. */
+function cancelCropSelectionResize() {
+  const d = appState.cropSelDrag;
+  if (!d) return;
+  appState.cropSelDrag = null;
+  appState.document.selection = d.startSelection;
+  appState.cropSelHover = null;
+  canvasViewport.style.cursor = appState.activeTool === 'crop' ? 'crosshair' : '';
+  renderApp();
+}
+
+/**
  * Cancels an interactive layer transform drag (Esc), discarding the preview
  */
 function cancelTransformDrag() {
@@ -1179,6 +1254,26 @@ canvasViewport.addEventListener('pointerdown', (e) => {
     }
   }
 
+  // Resize handles for an existing single-rect selection (Crop tool): starting
+  // a handle drag here must not begin a new selection drag
+  if (appState.activeTool === 'crop' && appState.document.selection) {
+    const startBounds = getSimpleRectSelectionBounds();
+    if (startBounds) {
+      const tol = 6 / appState.viewport.zoom;
+      const hit = hitTestHandles(startBounds, docPos.rawX, docPos.rawY, tol);
+      if (hit) {
+        appState.cropSelDrag = {
+          handleId: hit,
+          startBounds,
+          startSelection: appState.document.selection
+        };
+        canvasViewport.style.cursor = HANDLE_CURSORS[hit];
+        renderApp();
+        return;
+      }
+    }
+  }
+
   if (appState.activeTool === 'select-rect' || appState.activeTool === 'select-lasso') {
     appState.selDragMode = resolveSelectionMode(e);
   }
@@ -1247,6 +1342,23 @@ window.addEventListener('pointermove', (e) => {
     return;
   }
 
+  // Live crop-selection resize drag
+  if (appState.cropSelDrag) {
+    const newBounds = computeHandleResize(
+      appState.cropSelDrag.startBounds,
+      appState.cropSelDrag.handleId,
+      docPos.rawX,
+      docPos.rawY,
+      false
+    );
+    const sel = appState.document.selection;
+    appState.document.selection = createRectSelection(
+      newBounds.x, newBounds.y, newBounds.w, newBounds.h, sel.feather
+    );
+    renderApp();
+    return;
+  }
+
   // Transform handle hover feedback (Transform tool)
   if (appState.activeTool === 'transform' && !appState.isPointerDown && !appState.document.selection) {
     const layer = getActiveLayer(appState.document);
@@ -1259,6 +1371,23 @@ window.addEventListener('pointermove', (e) => {
         renderOverlay();
       }
       canvasViewport.style.cursor = hit ? HANDLE_CURSORS[hit] : 'move';
+    }
+  }
+
+  // Crop-selection handle hover feedback (Crop tool)
+  if (appState.activeTool === 'crop' && !appState.isPointerDown && appState.document.selection && !appState.cropSelDrag) {
+    const bounds = getSimpleRectSelectionBounds();
+    if (bounds) {
+      const tol = 6 / appState.viewport.zoom;
+      const hit = hitTestHandles(bounds, docPos.rawX, docPos.rawY, tol);
+      if (hit !== appState.cropSelHover) {
+        appState.cropSelHover = hit;
+        renderOverlay();
+      }
+      canvasViewport.style.cursor = hit ? HANDLE_CURSORS[hit] : 'crosshair';
+    } else if (appState.cropSelHover) {
+      appState.cropSelHover = null;
+      renderOverlay();
     }
   }
 
@@ -1329,6 +1458,14 @@ window.addEventListener('pointerup', (e) => {
   // Commit interactive layer transform
   if (appState.transformDrag) {
     commitTransformDrag();
+    return;
+  }
+
+  // Commit interactive crop-selection resize
+  if (appState.cropSelDrag) {
+    appState.cropSelHover = null;
+    canvasViewport.style.cursor = 'crosshair';
+    commitCropSelectionResize();
     return;
   }
 
@@ -1894,6 +2031,13 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && appState.transformDrag) {
     e.preventDefault();
     cancelTransformDrag();
+    return;
+  }
+
+  // Cancel active crop-selection resize
+  if (e.key === 'Escape' && appState.cropSelDrag) {
+    e.preventDefault();
+    cancelCropSelectionResize();
     return;
   }
 
