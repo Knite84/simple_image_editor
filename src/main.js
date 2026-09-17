@@ -24,6 +24,7 @@ import './tools/select-lasso.js';
 import './tools/crop.js';
 import './tools/resize.js';
 import './tools/rotate.js';
+import './tools/flip.js';
 import './tools/hue-saturation.js';
 import './tools/blur.js';
 import './tools/fill.js';
@@ -101,6 +102,8 @@ const btnUndo = document.getElementById('btn-undo');
 const btnRedo = document.getElementById('btn-redo');
 const btnRotateCw = document.getElementById('btn-rotate-cw');
 const btnRotateCcw = document.getElementById('btn-rotate-ccw');
+const btnFlipX = document.getElementById('btn-flip-x');
+const btnFlipY = document.getElementById('btn-flip-y');
 const btnRecord = document.getElementById('btn-record');
 const recordBtnLabel = document.getElementById('record-btn-label');
 const btnBatchModal = document.getElementById('btn-batch-modal');
@@ -1595,6 +1598,14 @@ btnRotateCw.onclick = () => {
 };
 btnRotateCcw.onclick = () => {
   if (appState.document) executeOp({ name: 'rotate-layer', params: { direction: 'ccw' } });
+};
+
+// Mirror (Flip) Active Layer
+btnFlipX.onclick = () => {
+  if (appState.document) executeOp({ name: 'flip-layer', params: { axis: 'x' } });
+};
+btnFlipY.onclick = () => {
+  if (appState.document) executeOp({ name: 'flip-layer', params: { axis: 'y' } });
 };
 
 // Feather applies to the active selection immediately (select first, feather after)
